@@ -54,17 +54,42 @@ preset = st.selectbox(
     ["none", "deep_value", "rerating", "dividend_lowvol", "momentum", "eps_growth_breakout"],
 )
 
-mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), default=[])
-mcap_min = st.number_input("최소 시총(원)", min_value=0.0, value=0.0, step=100_000_000.0)
-value_min = st.number_input("최소 20D 평균 거래대금(원)", min_value=0.0, value=0.0, step=100_000_000.0)
-pbr_max = st.number_input("최대 PBR", min_value=0.0, value=10.0, step=0.1)
-roe_min = st.number_input("최소 ROE proxy", value=-1.0, step=0.01)
-above_200ma = st.checkbox("200일선 위")
+st.markdown("### 조건 선택")
+st.caption("원하는 조건만 체크해서 적용하세요. 체크하지 않은 조건은 필터에 사용되지 않습니다.")
 
-st.markdown("### Growth Screener 조건")
-eps_cagr_5y_min = st.number_input("최근 5년 EPS CAGR 최소", value=0.15, step=0.01, format="%.2f")
-eps_yoy_q_min = st.number_input("최근 분기 EPS YoY 최소", value=0.25, step=0.01, format="%.2f")
-near_high_min = st.number_input("현재가 / 52주 신고가 최소", value=0.90, step=0.01, format="%.2f")
+mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), default=[])
+
+apply_mcap_min = st.checkbox("최소 시총(원) 적용", value=False)
+mcap_min = st.number_input("최소 시총(원)", min_value=0.0, value=0.0, step=100_000_000.0, disabled=not apply_mcap_min)
+
+apply_value_min = st.checkbox("최소 20D 평균 거래대금(원) 적용", value=False)
+value_min = st.number_input(
+    "최소 20D 평균 거래대금(원)", min_value=0.0, value=0.0, step=100_000_000.0, disabled=not apply_value_min
+)
+
+apply_pbr_max = st.checkbox("최대 PBR 적용", value=False)
+pbr_max = st.number_input("최대 PBR", min_value=0.0, value=1.0, step=0.1, disabled=not apply_pbr_max)
+
+apply_roe_min = st.checkbox("최소 ROE proxy 적용", value=False)
+roe_min = st.number_input("최소 ROE proxy", value=0.1, step=0.01, disabled=not apply_roe_min)
+
+above_200ma = st.checkbox("200일선 위 조건 적용", value=False)
+
+st.markdown("### Growth 조건 선택")
+apply_eps_cagr_5y = st.checkbox("최근 5년 EPS CAGR 조건 적용", value=False)
+eps_cagr_5y_min = st.number_input(
+    "최근 5년 EPS CAGR 최소", value=0.15, step=0.01, format="%.2f", disabled=not apply_eps_cagr_5y
+)
+
+apply_eps_yoy_q = st.checkbox("최근 분기 EPS YoY 조건 적용", value=False)
+eps_yoy_q_min = st.number_input(
+    "최근 분기 EPS YoY 최소", value=0.25, step=0.01, format="%.2f", disabled=not apply_eps_yoy_q
+)
+
+apply_near_high = st.checkbox("현재가 / 52주 신고가 조건 적용", value=False)
+near_high_min = st.number_input(
+    "현재가 / 52주 신고가 최소", value=0.90, step=0.01, format="%.2f", disabled=not apply_near_high
+)
 
 filtered = base.copy()
 if preset != "none":
@@ -72,19 +97,22 @@ if preset != "none":
 
 if mkt:
     filtered = filtered[filtered["market"].isin(mkt)]
-if mcap_min > 0:
+if apply_mcap_min:
     filtered = filtered[filtered["mcap"] >= mcap_min]
-if value_min > 0:
+if apply_value_min:
     filtered = filtered[filtered["avg_value_20d"] >= value_min]
-filtered = filtered[filtered["pbr"].fillna(9999) <= pbr_max]
-filtered = filtered[filtered["roe_proxy"].fillna(-999) >= roe_min]
+if apply_pbr_max:
+    filtered = filtered[filtered["pbr"].fillna(9999) <= pbr_max]
+if apply_roe_min:
+    filtered = filtered[filtered["roe_proxy"].fillna(-999) >= roe_min]
 if above_200ma:
     filtered = filtered[filtered["dist_sma200"] >= 0]
-
-# Requested growth conditions
-filtered = filtered[filtered["eps_cagr_5y"].fillna(-999) >= eps_cagr_5y_min]
-filtered = filtered[filtered["eps_yoy_q"].fillna(-999) >= eps_yoy_q_min]
-filtered = filtered[filtered["near_52w_high_ratio"].fillna(-999) >= near_high_min]
+if apply_eps_cagr_5y:
+    filtered = filtered[filtered["eps_cagr_5y"].fillna(-999) >= eps_cagr_5y_min]
+if apply_eps_yoy_q:
+    filtered = filtered[filtered["eps_yoy_q"].fillna(-999) >= eps_yoy_q_min]
+if apply_near_high:
+    filtered = filtered[filtered["near_52w_high_ratio"].fillna(-999) >= near_high_min]
 
 sort_col = st.selectbox(
     "정렬 컬럼",
