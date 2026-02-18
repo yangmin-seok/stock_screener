@@ -11,10 +11,17 @@ class Repository:
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
 
+    @staticmethod
+    def _to_sql_records(frame: pd.DataFrame, columns: list[str]) -> list[tuple]:
+        data = frame[columns].copy()
+        data = data.where(pd.notna(data), None)
+        return [tuple(row) for row in data.itertuples(index=False, name=None)]
+
+
     def upsert_tickers(self, frame: pd.DataFrame) -> int:
         if frame.empty:
             return 0
-        rows = frame[["ticker", "name", "market", "active_flag"]].to_records(index=False).tolist()
+        rows = self._to_sql_records(frame, ["ticker", "name", "market", "active_flag"])
         with db_session(self.db_path) as conn:
             conn.executemany(
                 """
@@ -36,7 +43,7 @@ class Repository:
         data = frame.copy()
         if "value" not in data.columns:
             data["value"] = pd.NA
-        rows = data[["date", "ticker", "open", "high", "low", "close", "volume", "value"]].to_records(index=False).tolist()
+        rows = self._to_sql_records(data, ["date", "ticker", "open", "high", "low", "close", "volume", "value"])
         with db_session(self.db_path) as conn:
             conn.executemany(
                 """
@@ -58,7 +65,7 @@ class Repository:
     def upsert_cap(self, frame: pd.DataFrame) -> int:
         if frame.empty:
             return 0
-        rows = frame[["date", "ticker", "mcap", "shares", "volume", "value"]].to_records(index=False).tolist()
+        rows = self._to_sql_records(frame, ["date", "ticker", "mcap", "shares", "volume", "value"])
         with db_session(self.db_path) as conn:
             conn.executemany(
                 """
@@ -78,7 +85,7 @@ class Repository:
     def upsert_fundamental(self, frame: pd.DataFrame) -> int:
         if frame.empty:
             return 0
-        rows = frame[["date", "ticker", "per", "pbr", "eps", "bps", "div", "dps"]].to_records(index=False).tolist()
+        rows = self._to_sql_records(frame, ["date", "ticker", "per", "pbr", "eps", "bps", "div", "dps"])
         with db_session(self.db_path) as conn:
             conn.executemany(
                 """
@@ -108,7 +115,7 @@ class Repository:
                 "dist_sma20", "dist_sma50", "dist_sma200", "high_52w", "low_52w", "pos_52w", "near_52w_high_ratio",
                 "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_5y", "eps_yoy_q", "calc_version",
             ]
-            rows = frame[cols].to_records(index=False).tolist()
+            rows = self._to_sql_records(frame, cols)
             placeholders = ", ".join(["?"] * len(cols))
             conn.executemany(
                 f"""
