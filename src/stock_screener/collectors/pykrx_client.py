@@ -17,6 +17,46 @@ class PykrxCollector:
     def fmt(dt: date | datetime) -> str:
         return dt.strftime("%Y%m%d")
 
+    @staticmethod
+    def _pick_column(frame: pd.DataFrame, candidates: list[str]) -> str | None:
+        for name in candidates:
+            if name in frame.columns:
+                return name
+        return None
+
+    @classmethod
+    def _normalize_ohlcv(cls, frame: pd.DataFrame) -> pd.DataFrame:
+        colmap: dict[str, list[str]] = {
+            "open": ["시가", "Open", "open"],
+            "high": ["고가", "High", "high"],
+            "low": ["저가", "Low", "low"],
+            "close": ["종가", "Close", "close"],
+            "volume": ["거래량", "Volume", "volume"],
+            "value": ["거래대금", "거래대금(원)", "거래대금(백만원)", "Value", "value"],
+        }
+
+        out = pd.DataFrame(index=frame.index)
+        missing_required: list[str] = []
+
+        for target in ("open", "high", "low", "close", "volume"):
+            src = cls._pick_column(frame, colmap[target])
+            if src is None:
+                missing_required.append(target)
+            else:
+                out[target] = pd.to_numeric(frame[src], errors="coerce")
+
+        if missing_required:
+            raise KeyError(f"Missing required OHLCV columns: {missing_required}. available={list(frame.columns)}")
+
+        value_src = cls._pick_column(frame, colmap["value"])
+        if value_src is None:
+            # Some pykrx responses may omit 거래대금; use a conservative fallback.
+            out["value"] = out["close"].fillna(0) * out["volume"].fillna(0)
+        else:
+            out["value"] = pd.to_numeric(frame[value_src], errors="coerce")
+
+        return out
+
     def _retry(self, fn, *args, **kwargs):
         last_error = None
         for idx in range(self.retries):
@@ -49,21 +89,12 @@ class PykrxCollector:
         frame = self._retry(stock.get_market_ohlcv_by_date, self.fmt(from_dt), self.fmt(to_dt), ticker)
         if frame.empty:
             return pd.DataFrame()
-        frame = frame.rename(
-            columns={
-                "시가": "open",
-                "고가": "high",
-                "저가": "low",
-                "종가": "close",
-                "거래량": "volume",
-                "거래대금": "value",
-            }
-        )
+
         frame.index = pd.to_datetime(frame.index)
-        frame = frame[["open", "high", "low", "close", "volume", "value"]]
-        frame["date"] = frame.index.strftime("%Y-%m-%d")
-        frame["ticker"] = ticker
-        return frame.reset_index(drop=True)
+        norm = self._normalize_ohlcv(frame)
+        norm["date"] = norm.index.strftime("%Y-%m-%d")
+        norm["ticker"] = ticker
+        return norm.reset_index(drop=True)
 
     def market_cap(self, dt: date) -> pd.DataFrame:
         frame = self._retry(stock.get_market_cap, self.fmt(dt))
@@ -77,6 +108,10 @@ class PykrxCollector:
                 "거래대금": "value",
             }
         )
+        for col in ("mcap", "shares", "volume", "value"):
+            if col not in frame.columns:
+                frame[col] = 0
+            frame[col] = pd.to_numeric(frame[col], errors="coerce")
         frame.index.name = "ticker"
         frame = frame.reset_index()[["ticker", "mcap", "shares", "volume", "value"]]
         frame["date"] = dt.strftime("%Y-%m-%d")
@@ -96,6 +131,9 @@ class PykrxCollector:
                 "DPS": "dps",
             }
         )
+        for col in ("per", "pbr", "eps", "bps", "div", "dps"):
+            if col not in frame.columns:
+                frame[col] = pd.NA
         frame.index.name = "ticker"
         frame = frame.reset_index()[["ticker", "per", "pbr", "eps", "bps", "div", "dps"]]
         frame["date"] = dt.strftime("%Y-%m-%d")
