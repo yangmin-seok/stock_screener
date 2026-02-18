@@ -13,6 +13,7 @@ def main() -> None:
     parser.add_argument("--asof-date", default=None)
     parser.add_argument("--lookback-days", type=int, default=400)
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+    parser.add_argument("--snapshot-only", action="store_true", help="Rebuild snapshot from cached DB data only")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -21,7 +22,10 @@ def main() -> None:
     )
 
     pipeline = DailyBatchPipeline(Path(args.db_path))
-    result = pipeline.run(asof_date=args.asof_date, lookback_days=args.lookback_days)
+    if args.snapshot_only:
+        result = pipeline.rebuild_snapshot_only(asof_date=args.asof_date, lookback_days=args.lookback_days)
+    else:
+        result = pipeline.run(asof_date=args.asof_date, lookback_days=args.lookback_days)
     print(result)
 
 

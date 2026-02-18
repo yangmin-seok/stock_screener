@@ -24,21 +24,32 @@ if "asof" not in st.session_state:
 
 c1, c2, c3 = st.columns([1, 1, 2])
 with c1:
-    refresh = st.button("데이터 수집/스냅샷 생성", type="primary")
+    refresh_full = st.button("전체 수집 + 스냅샷", type="primary")
 with c2:
+    refresh_snapshot = st.button("스냅샷만 재계산", help="이미 수집된 DB 데이터로 snapshot만 다시 계산")
+with c3:
     force_date = st.date_input("asof date (optional)", value=None)
 
-if refresh:
-    with st.spinner("pykrx 수집 및 snapshot 생성 중... (최초 1회 느림)"):
-        result = pipeline.run(asof_date=force_date.strftime("%Y-%m-%d") if force_date else None)
+target_asof = force_date.strftime("%Y-%m-%d") if force_date else None
+
+if refresh_full:
+    with st.spinner("pykrx 전체 수집 + snapshot 생성 중... (초기 1회 느림)"):
+        result = pipeline.run(asof_date=target_asof)
     st.session_state.asof = result.asof_date
     st.success(
-        f"완료: {result.asof_date} | 티커 {result.tickers}개 | fundamental upsert {result.fundamental:,}건 | snapshot {result.snapshot}건"
+        f"전체 수집 완료: {result.asof_date} | 티커 {result.tickers}개 | "
+        f"prices {result.prices:,}건 | cap {result.cap:,}건 | fundamental {result.fundamental:,}건 | snapshot {result.snapshot:,}건"
     )
+
+if refresh_snapshot:
+    with st.spinner("DB 캐시 기반 snapshot만 재계산 중..."):
+        result = pipeline.rebuild_snapshot_only(asof_date=target_asof)
+    st.session_state.asof = result.asof_date
+    st.success(f"스냅샷 재계산 완료: {result.asof_date} | snapshot {result.snapshot:,}건")
 
 asof = st.session_state.asof
 if not asof:
-    st.warning("snapshot이 없습니다. 먼저 '데이터 수집/스냅샷 생성' 버튼을 실행하세요.")
+    st.warning("snapshot이 없습니다. 먼저 '전체 수집 + 스냅샷' 또는 '스냅샷만 재계산' 버튼을 실행하세요.")
     st.stop()
 
 base = repo.load_snapshot(asof)
@@ -55,7 +66,7 @@ preset = st.selectbox(
 )
 
 st.markdown("### 조건 선택")
-st.caption("원하는 조건만 체크해서 적용하세요. 체크하지 않은 조건은 필터에 사용되지 않습니다.")
+st.caption("원하는 조건만 체크해서 적용하세요. 체크하지 않은 조건은 필터에 사용되지 않습니다. 프리셋 `none`은 프리셋 조건을 적용하지 않는 모드입니다.")
 
 mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), default=[])
 
@@ -102,17 +113,17 @@ if apply_mcap_min:
 if apply_value_min:
     filtered = filtered[filtered["avg_value_20d"] >= value_min]
 if apply_pbr_max:
-    filtered = filtered[filtered["pbr"].fillna(9999) <= pbr_max]
+    filtered = filtered[(filtered["pbr"].notna()) & (filtered["pbr"] <= pbr_max)]
 if apply_roe_min:
-    filtered = filtered[filtered["roe_proxy"].fillna(-999) >= roe_min]
+    filtered = filtered[(filtered["roe_proxy"].notna()) & (filtered["roe_proxy"] >= roe_min)]
 if above_200ma:
     filtered = filtered[filtered["dist_sma200"] >= 0]
 if apply_eps_cagr_5y:
-    filtered = filtered[filtered["eps_cagr_5y"].fillna(-999) >= eps_cagr_5y_min]
+    filtered = filtered[(filtered["eps_cagr_5y"].notna()) & (filtered["eps_cagr_5y"] >= eps_cagr_5y_min)]
 if apply_eps_yoy_q:
-    filtered = filtered[filtered["eps_yoy_q"].fillna(-999) >= eps_yoy_q_min]
+    filtered = filtered[(filtered["eps_yoy_q"].notna()) & (filtered["eps_yoy_q"] >= eps_yoy_q_min)]
 if apply_near_high:
-    filtered = filtered[filtered["near_52w_high_ratio"].fillna(-999) >= near_high_min]
+    filtered = filtered[(filtered["near_52w_high_ratio"].notna()) & (filtered["near_52w_high_ratio"] >= near_high_min)]
 
 sort_col = st.selectbox(
     "정렬 컬럼",
@@ -129,7 +140,7 @@ show_cols = [
     "eps", "bps", "roe_proxy", "eps_positive", "ret_3m", "ret_1y", "dist_sma200", "pos_52w",
     "near_52w_high_ratio", "eps_cagr_5y", "eps_yoy_q",
 ]
-st.dataframe(filtered[show_cols], use_container_width=True, hide_index=True)
+st.dataframe(filtered[show_cols], width="stretch", hide_index=True)
 
 csv = filtered[show_cols].to_csv(index=False).encode("utf-8-sig")
 st.download_button("CSV 다운로드", data=csv, file_name=f"screener_{asof}.csv", mime="text/csv")

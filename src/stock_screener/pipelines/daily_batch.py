@@ -101,3 +101,32 @@ class DailyBatchPipeline:
             fundamental=fund_rows,
             snapshot=snap_rows,
         )
+
+    def rebuild_snapshot_only(self, asof_date: str | None = None, lookback_days: int = 400) -> BatchResult:
+        dt = pd.to_datetime(asof_date).date() if asof_date else self.collector.recent_business_day()
+        asof_str = dt.strftime("%Y-%m-%d")
+        logger.info("Starting snapshot-only rebuild: asof=%s, lookback_days=%s", asof_str, lookback_days)
+
+        ticker_count = self.repo.upsert_tickers(self.collector.tickers())
+
+        price_window = self.repo.get_price_window(asof_str, window=lookback_days)
+        daily = self.repo.get_daily_join(asof_str)
+        fund_hist = self.repo.get_fundamental_window(asof_str, years=6)
+        snapshot = build_snapshot(price_window, daily, fund_hist, asof_str)
+        snap_rows = self.repo.replace_snapshot(asof_str, snapshot)
+
+        logger.info(
+            "Snapshot-only rebuild completed: asof=%s, tickers=%s, snapshot=%s",
+            asof_str,
+            ticker_count,
+            snap_rows,
+        )
+
+        return BatchResult(
+            asof_date=asof_str,
+            tickers=ticker_count,
+            prices=0,
+            cap=0,
+            fundamental=0,
+            snapshot=snap_rows,
+        )

@@ -29,9 +29,22 @@ streamlit run src/stock_screener/web/app.py
 python -m stock_screener.cli --db-path data/screener.db
 ```
 
+
+## 프리셋/필터 동작 방식
+- 프리셋은 자주 쓰는 3개 조건 묶음을 한 번에 적용하는 시작점입니다.
+- `none`을 선택하면 **프리셋 조건은 0개**이며, 사용자가 체크한 커스텀 조건만 적용됩니다.
+- 필터는 체크된 조건만 순차 적용되며, 선택한 조건들끼리는 AND로 결합됩니다.
+- UI에서 `스냅샷만 재계산` 버튼을 누르면 이미 수집된 DB 캐시로 `snapshot_metrics`만 다시 계산하므로 빠릅니다.
+
 ## 기본 프리셋
 - deep_value
 - rerating
 - dividend_lowvol
 - momentum
 - eps_growth_breakout
+
+
+## 실행 시간 가이드
+- **전체 수집 + 스냅샷**: 최초 1회는 티커×기간 API 호출 때문에 수 분~수십 분이 걸릴 수 있습니다.
+- **스냅샷만 재계산**: DB에 가격/시총/펀더멘털이 이미 있으면 보통 수 초~수십 초 수준입니다(환경/데이터량 의존).
+
