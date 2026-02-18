@@ -103,11 +103,17 @@ class DailyBatchPipeline:
         )
 
     def rebuild_snapshot_only(self, asof_date: str | None = None, lookback_days: int = 400) -> BatchResult:
-        dt = pd.to_datetime(asof_date).date() if asof_date else self.collector.recent_business_day()
-        asof_str = dt.strftime("%Y-%m-%d")
+        if asof_date:
+            dt = pd.to_datetime(asof_date).date()
+            asof_str = dt.strftime("%Y-%m-%d")
+        else:
+            asof_str = self.repo.get_latest_price_date() or self.repo.get_latest_snapshot_date() or self.collector.recent_business_day().strftime("%Y-%m-%d")
+
         logger.info("Starting snapshot-only rebuild: asof=%s, lookback_days=%s", asof_str, lookback_days)
 
-        ticker_count = self.repo.upsert_tickers(self.collector.tickers())
+        ticker_count = self.repo.count_active_tickers()
+        if ticker_count == 0:
+            logger.warning("ticker_master is empty. Run full collection at least once before snapshot-only rebuild.")
 
         price_window = self.repo.get_price_window(asof_str, window=lookback_days)
         daily = self.repo.get_daily_join(asof_str)
