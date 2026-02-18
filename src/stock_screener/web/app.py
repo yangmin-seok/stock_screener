@@ -24,21 +24,35 @@ if "asof" not in st.session_state:
 
 c1, c2, c3 = st.columns([1, 1, 2])
 with c1:
-    refresh = st.button("데이터 수집/스냅샷 생성", type="primary")
+    refresh_full = st.button("전체 수집 + 스냅샷", type="primary")
 with c2:
+    refresh_snapshot = st.button("스냅샷만 재계산", help="이미 수집된 DB 데이터로 snapshot만 다시 계산")
+with c3:
     force_date = st.date_input("asof date (optional)", value=None)
 
-if refresh:
-    with st.spinner("pykrx 수집 및 snapshot 생성 중... (최초 1회 느림)"):
-        result = pipeline.run(asof_date=force_date.strftime("%Y-%m-%d") if force_date else None)
+target_asof = force_date.strftime("%Y-%m-%d") if force_date else None
+
+if refresh_full:
+    with st.spinner("pykrx 전체 수집 + snapshot 생성 중... (초기 1회 느림)"):
+        result = pipeline.run(asof_date=target_asof)
     st.session_state.asof = result.asof_date
     st.success(
-        f"완료: {result.asof_date} | 티커 {result.tickers}개 | fundamental upsert {result.fundamental:,}건 | snapshot {result.snapshot}건"
+        f"전체 수집 완료: {result.asof_date} | 티커 {result.tickers}개 | "
+        f"prices {result.prices:,}건 | cap {result.cap:,}건 | fundamental {result.fundamental:,}건 | snapshot {result.snapshot:,}건"
     )
+
+if refresh_snapshot:
+    try:
+        with st.spinner("DB 캐시 기반 snapshot만 재계산 중..."):
+            result = pipeline.rebuild_snapshot_only(asof_date=target_asof)
+        st.session_state.asof = result.asof_date
+        st.success(f"스냅샷 재계산 완료: {result.asof_date} | snapshot {result.snapshot:,}건")
+    except ValueError as exc:
+        st.error(f"스냅샷만 재계산 실패: {exc}")
 
 asof = st.session_state.asof
 if not asof:
-    st.warning("snapshot이 없습니다. 먼저 '데이터 수집/스냅샷 생성' 버튼을 실행하세요.")
+    st.warning("snapshot이 없습니다. 먼저 '전체 수집 + 스냅샷' 또는 '스냅샷만 재계산' 버튼을 실행하세요.")
     st.stop()
 
 base = repo.load_snapshot(asof)
@@ -54,17 +68,59 @@ preset = st.selectbox(
     ["none", "deep_value", "rerating", "dividend_lowvol", "momentum", "eps_growth_breakout"],
 )
 
-mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), default=[])
-mcap_min = st.number_input("최소 시총(원)", min_value=0.0, value=0.0, step=100_000_000.0)
-value_min = st.number_input("최소 20D 평균 거래대금(원)", min_value=0.0, value=0.0, step=100_000_000.0)
-pbr_max = st.number_input("최대 PBR", min_value=0.0, value=10.0, step=0.1)
-roe_min = st.number_input("최소 ROE proxy", value=-1.0, step=0.01)
-above_200ma = st.checkbox("200일선 위")
+st.markdown("### 조건 선택")
+st.caption("원하는 조건만 체크해서 적용하세요. 체크하지 않은 조건은 필터에 사용되지 않습니다. 프리셋 `none`은 프리셋 조건을 적용하지 않는 모드입니다.")
 
-st.markdown("### Growth Screener 조건")
-eps_cagr_5y_min = st.number_input("최근 5년 EPS CAGR 최소", value=0.15, step=0.01, format="%.2f")
-eps_yoy_q_min = st.number_input("최근 분기 EPS YoY 최소", value=0.25, step=0.01, format="%.2f")
-near_high_min = st.number_input("현재가 / 52주 신고가 최소", value=0.90, step=0.01, format="%.2f")
+mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), default=[])
+
+apply_mcap_min = st.checkbox("최소 시총(원) 적용", value=False)
+mcap_min = st.number_input("최소 시총(원)", min_value=0.0, value=0.0, step=100_000_000.0, disabled=not apply_mcap_min)
+
+apply_value_min = st.checkbox("최소 20D 평균 거래대금(원) 적용", value=False)
+value_min = st.number_input(
+    "최소 20D 평균 거래대금(원)", min_value=0.0, value=0.0, step=100_000_000.0, disabled=not apply_value_min
+)
+
+apply_pbr_max = st.checkbox("최대 PBR 적용", value=False)
+pbr_max = st.number_input("최대 PBR", min_value=0.0, value=1.0, step=0.1, disabled=not apply_pbr_max)
+
+apply_roe_min = st.checkbox("최소 ROE proxy 적용", value=False)
+roe_min = st.number_input("최소 ROE proxy", value=0.1, step=0.01, disabled=not apply_roe_min)
+
+above_200ma = st.checkbox("200일선 위 조건 적용", value=False)
+
+st.markdown("### Growth 조건 선택")
+apply_eps_cagr_5y = st.checkbox("최근 5년 EPS CAGR 조건 적용", value=False)
+eps_cagr_5y_min = st.number_input(
+    "최근 5년 EPS CAGR 최소", value=0.15, step=0.01, format="%.2f", disabled=not apply_eps_cagr_5y
+)
+
+apply_eps_yoy_q = st.checkbox("최근 분기 EPS YoY 조건 적용", value=False)
+eps_yoy_q_min = st.number_input(
+    "최근 분기 EPS YoY 최소", value=0.25, step=0.01, format="%.2f", disabled=not apply_eps_yoy_q
+)
+
+apply_near_high = st.checkbox("현재가 / 52주 신고가 조건 적용", value=False)
+near_high_min = st.number_input(
+    "현재가 / 52주 신고가 최소", value=0.90, step=0.01, format="%.2f", disabled=not apply_near_high
+)
+
+
+active_filter_count = sum(
+    [
+        int(preset != "none"),
+        int(bool(mkt)),
+        int(apply_mcap_min),
+        int(apply_value_min),
+        int(apply_pbr_max),
+        int(apply_roe_min),
+        int(above_200ma),
+        int(apply_eps_cagr_5y),
+        int(apply_eps_yoy_q),
+        int(apply_near_high),
+    ]
+)
+st.caption(f"적용 중인 조건 수: {active_filter_count}개")
 
 filtered = base.copy()
 if preset != "none":
@@ -72,19 +128,22 @@ if preset != "none":
 
 if mkt:
     filtered = filtered[filtered["market"].isin(mkt)]
-if mcap_min > 0:
+if apply_mcap_min:
     filtered = filtered[filtered["mcap"] >= mcap_min]
-if value_min > 0:
+if apply_value_min:
     filtered = filtered[filtered["avg_value_20d"] >= value_min]
-filtered = filtered[filtered["pbr"].fillna(9999) <= pbr_max]
-filtered = filtered[filtered["roe_proxy"].fillna(-999) >= roe_min]
+if apply_pbr_max:
+    filtered = filtered[(filtered["pbr"].notna()) & (filtered["pbr"] <= pbr_max)]
+if apply_roe_min:
+    filtered = filtered[(filtered["roe_proxy"].notna()) & (filtered["roe_proxy"] >= roe_min)]
 if above_200ma:
     filtered = filtered[filtered["dist_sma200"] >= 0]
-
-# Requested growth conditions
-filtered = filtered[filtered["eps_cagr_5y"].fillna(-999) >= eps_cagr_5y_min]
-filtered = filtered[filtered["eps_yoy_q"].fillna(-999) >= eps_yoy_q_min]
-filtered = filtered[filtered["near_52w_high_ratio"].fillna(-999) >= near_high_min]
+if apply_eps_cagr_5y:
+    filtered = filtered[(filtered["eps_cagr_5y"].notna()) & (filtered["eps_cagr_5y"] >= eps_cagr_5y_min)]
+if apply_eps_yoy_q:
+    filtered = filtered[(filtered["eps_yoy_q"].notna()) & (filtered["eps_yoy_q"] >= eps_yoy_q_min)]
+if apply_near_high:
+    filtered = filtered[(filtered["near_52w_high_ratio"].notna()) & (filtered["near_52w_high_ratio"] >= near_high_min)]
 
 sort_col = st.selectbox(
     "정렬 컬럼",
@@ -96,12 +155,15 @@ limit = st.slider("출력 개수", min_value=10, max_value=500, value=100, step=
 
 filtered = filtered.sort_values(sort_col, ascending=ascending).head(limit)
 
+if filtered.empty:
+    st.warning("조건을 만족하는 종목이 없습니다. Growth 조건(EPS CAGR/EPS YoY) 임계값을 낮추거나 체크를 해제해 보세요.")
+
 show_cols = [
     "ticker", "name", "market", "close", "mcap", "avg_value_20d", "pbr", "per", "div", "dps",
     "eps", "bps", "roe_proxy", "eps_positive", "ret_3m", "ret_1y", "dist_sma200", "pos_52w",
     "near_52w_high_ratio", "eps_cagr_5y", "eps_yoy_q",
 ]
-st.dataframe(filtered[show_cols], use_container_width=True, hide_index=True)
+st.dataframe(filtered[show_cols], width="stretch", hide_index=True)
 
 csv = filtered[show_cols].to_csv(index=False).encode("utf-8-sig")
 st.download_button("CSV 다운로드", data=csv, file_name=f"screener_{asof}.csv", mime="text/csv")

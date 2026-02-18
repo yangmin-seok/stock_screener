@@ -179,6 +179,17 @@ class Repository:
         with db_session(self.db_path) as conn:
             return pd.read_sql_query(query, conn, params=(end_date, end_date, f"-{years} years"))
 
+
+    def get_latest_price_date(self) -> str | None:
+        with db_session(self.db_path) as conn:
+            row = conn.execute("SELECT MAX(date) AS d FROM prices_daily").fetchone()
+        return row[0] if row and row[0] else None
+
+    def count_active_tickers(self) -> int:
+        with db_session(self.db_path) as conn:
+            row = conn.execute("SELECT COUNT(*) FROM ticker_master WHERE active_flag = 1").fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
     def get_latest_snapshot_date(self) -> str | None:
         with db_session(self.db_path) as conn:
             row = conn.execute("SELECT MAX(asof_date) AS d FROM snapshot_metrics").fetchone()
