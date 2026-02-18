@@ -139,7 +139,17 @@ class PykrxCollector:
         return frame
 
     def fundamental(self, dt: date) -> pd.DataFrame:
-        frame = self._retry(stock.get_market_fundamental, self.fmt(dt), market="ALL")
+        query_dt = dt
+        frame = self._retry(stock.get_market_fundamental, self.fmt(query_dt), market="ALL")
+        if frame.empty:
+            # Quarter/month end can fall on non-trading day; fallback to nearest prior business day.
+            for offset in range(1, 8):
+                candidate = dt - timedelta(days=offset)
+                frame = self._retry(stock.get_market_fundamental, self.fmt(candidate), market="ALL")
+                if not frame.empty:
+                    query_dt = candidate
+                    logger.debug("Fundamental fallback date used: target=%s -> actual=%s", dt, candidate)
+                    break
         if frame.empty:
             logger.warning("No fundamental data for date=%s", dt)
             return pd.DataFrame()
@@ -158,6 +168,6 @@ class PykrxCollector:
                 frame[col] = pd.NA
         frame.index.name = "ticker"
         frame = frame.reset_index()[["ticker", "per", "pbr", "eps", "bps", "div", "dps"]]
-        frame["date"] = dt.strftime("%Y-%m-%d")
-        logger.debug("Collected fundamental rows=%s for date=%s", len(frame), dt)
+        frame["date"] = query_dt.strftime("%Y-%m-%d")
+        logger.debug("Collected fundamental rows=%s for date=%s", len(frame), query_dt)
         return frame

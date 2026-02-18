@@ -32,13 +32,17 @@ def _eps_growth_metrics(fund_hist: pd.DataFrame, ticker: str, asof_date: str) ->
     else:
         eps_cagr_5y = np.nan
 
-    # Quarterly YoY approximation using quarter-end EPS snapshot vs same quarter last year.
-    q_end = (asof_ts.to_period("Q")).end_time.normalize()
-    q_prev_year = q_end - pd.DateOffset(years=1)
-    eps_q = _nearest_on_or_before(eps_series, q_end)
-    eps_q_prev = _nearest_on_or_before(eps_series, q_prev_year)
-    if pd.notna(eps_q) and pd.notna(eps_q_prev) and eps_q_prev > 0:
-        eps_yoy_q = eps_q / eps_q_prev - 1
+    # Quarterly YoY approximation using latest available EPS on/before asof vs one year earlier.
+    latest_dt = eps_series.index[eps_series.index <= asof_ts]
+    if len(latest_dt) > 0:
+        ref_dt = latest_dt[-1]
+        prev_ref_dt = ref_dt - pd.DateOffset(years=1)
+        eps_q = _nearest_on_or_before(eps_series, ref_dt)
+        eps_q_prev = _nearest_on_or_before(eps_series, prev_ref_dt)
+        if pd.notna(eps_q) and pd.notna(eps_q_prev) and eps_q_prev != 0:
+            eps_yoy_q = eps_q / eps_q_prev - 1
+        else:
+            eps_yoy_q = np.nan
     else:
         eps_yoy_q = np.nan
 

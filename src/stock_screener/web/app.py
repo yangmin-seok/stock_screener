@@ -42,10 +42,13 @@ if refresh_full:
     )
 
 if refresh_snapshot:
-    with st.spinner("DB 캐시 기반 snapshot만 재계산 중..."):
-        result = pipeline.rebuild_snapshot_only(asof_date=target_asof)
-    st.session_state.asof = result.asof_date
-    st.success(f"스냅샷 재계산 완료: {result.asof_date} | snapshot {result.snapshot:,}건")
+    try:
+        with st.spinner("DB 캐시 기반 snapshot만 재계산 중..."):
+            result = pipeline.rebuild_snapshot_only(asof_date=target_asof)
+        st.session_state.asof = result.asof_date
+        st.success(f"스냅샷 재계산 완료: {result.asof_date} | snapshot {result.snapshot:,}건")
+    except ValueError as exc:
+        st.error(f"스냅샷만 재계산 실패: {exc}")
 
 asof = st.session_state.asof
 if not asof:
@@ -102,6 +105,23 @@ near_high_min = st.number_input(
     "현재가 / 52주 신고가 최소", value=0.90, step=0.01, format="%.2f", disabled=not apply_near_high
 )
 
+
+active_filter_count = sum(
+    [
+        int(preset != "none"),
+        int(bool(mkt)),
+        int(apply_mcap_min),
+        int(apply_value_min),
+        int(apply_pbr_max),
+        int(apply_roe_min),
+        int(above_200ma),
+        int(apply_eps_cagr_5y),
+        int(apply_eps_yoy_q),
+        int(apply_near_high),
+    ]
+)
+st.caption(f"적용 중인 조건 수: {active_filter_count}개")
+
 filtered = base.copy()
 if preset != "none":
     filtered = apply_filters(filtered, preset_conditions(preset))
@@ -134,6 +154,9 @@ ascending = st.checkbox("오름차순", value=False)
 limit = st.slider("출력 개수", min_value=10, max_value=500, value=100, step=10)
 
 filtered = filtered.sort_values(sort_col, ascending=ascending).head(limit)
+
+if filtered.empty:
+    st.warning("조건을 만족하는 종목이 없습니다. Growth 조건(EPS CAGR/EPS YoY) 임계값을 낮추거나 체크를 해제해 보세요.")
 
 show_cols = [
     "ticker", "name", "market", "close", "mcap", "avg_value_20d", "pbr", "per", "div", "dps",
