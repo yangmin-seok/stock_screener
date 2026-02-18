@@ -59,6 +59,11 @@ def preset_conditions(name: str) -> list[FilterCondition]:
             FilterCondition("ret_3m", "gte", 0.0),
             FilterCondition("avg_value_20d", "gte", 500_000_000),
         ],
+        "eps_growth_breakout": [
+            FilterCondition("eps_cagr_5y", "gte", 0.15),
+            FilterCondition("eps_yoy_q", "gte", 0.25),
+            FilterCondition("near_52w_high_ratio", "gte", 0.90),
+        ],
     }
     if name not in presets:
         raise ValueError(f"Unknown preset: {name}")

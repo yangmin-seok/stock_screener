@@ -3,10 +3,54 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-CALC_VERSION = "v1.0"
+CALC_VERSION = "v1.1"
 
 
-def build_snapshot(price_window: pd.DataFrame, daily: pd.DataFrame, asof_date: str) -> pd.DataFrame:
+def _nearest_on_or_before(series: pd.Series, target: pd.Timestamp) -> float:
+    subset = series[series.index <= target]
+    if subset.empty:
+        return np.nan
+    return subset.iloc[-1]
+
+
+def _eps_growth_metrics(fund_hist: pd.DataFrame, ticker: str, asof_date: str) -> tuple[float, float]:
+    subset = fund_hist[fund_hist["ticker"] == ticker][["date", "eps"]].copy()
+    if subset.empty:
+        return np.nan, np.nan
+    subset["date"] = pd.to_datetime(subset["date"])
+    subset = subset.dropna(subset=["eps"]).sort_values("date")
+    if subset.empty:
+        return np.nan, np.nan
+
+    eps_series = pd.Series(subset["eps"].values, index=subset["date"])
+    asof_ts = pd.Timestamp(asof_date)
+    eps_now = _nearest_on_or_before(eps_series, asof_ts)
+
+    eps_5y_ago = _nearest_on_or_before(eps_series, asof_ts - pd.DateOffset(years=5))
+    if pd.notna(eps_now) and pd.notna(eps_5y_ago) and eps_now > 0 and eps_5y_ago > 0:
+        eps_cagr_5y = (eps_now / eps_5y_ago) ** (1 / 5) - 1
+    else:
+        eps_cagr_5y = np.nan
+
+    # Quarterly YoY approximation using quarter-end EPS snapshot vs same quarter last year.
+    q_end = (asof_ts.to_period("Q")).end_time.normalize()
+    q_prev_year = q_end - pd.DateOffset(years=1)
+    eps_q = _nearest_on_or_before(eps_series, q_end)
+    eps_q_prev = _nearest_on_or_before(eps_series, q_prev_year)
+    if pd.notna(eps_q) and pd.notna(eps_q_prev) and eps_q_prev > 0:
+        eps_yoy_q = eps_q / eps_q_prev - 1
+    else:
+        eps_yoy_q = np.nan
+
+    return eps_cagr_5y, eps_yoy_q
+
+
+def build_snapshot(
+    price_window: pd.DataFrame,
+    daily: pd.DataFrame,
+    fund_hist: pd.DataFrame,
+    asof_date: str,
+) -> pd.DataFrame:
     if price_window.empty:
         return pd.DataFrame()
 
@@ -15,7 +59,7 @@ def build_snapshot(price_window: pd.DataFrame, daily: pd.DataFrame, asof_date: s
     price_window = price_window.sort_values(["ticker", "date"])
 
     groups = []
-    for ticker, g in price_window.groupby("ticker", sort=False):
+    for _, g in price_window.groupby("ticker", sort=False):
         g = g.copy()
         g["ret_daily"] = g["close"].pct_change()
         g["sma20"] = g["close"].rolling(20).mean()
@@ -43,15 +87,22 @@ def build_snapshot(price_window: pd.DataFrame, daily: pd.DataFrame, asof_date: s
     merged["dist_sma200"] = merged["close"] / merged["sma200"] - 1
     denom = merged["high_52w"] - merged["low_52w"]
     merged["pos_52w"] = np.where(denom > 0, (merged["close"] - merged["low_52w"]) / denom, np.nan)
+    merged["near_52w_high_ratio"] = np.where(merged["high_52w"] > 0, merged["close"] / merged["high_52w"], np.nan)
     merged["turnover_20d"] = merged["avg_value_20d"] / merged["mcap"]
+
+    growth = merged[["ticker"]].copy()
+    growth[["eps_cagr_5y", "eps_yoy_q"]] = growth["ticker"].apply(
+        lambda x: pd.Series(_eps_growth_metrics(fund_hist, x, asof_date))
+    )
+    merged = merged.merge(growth, on="ticker", how="left")
 
     merged["asof_date"] = asof_date
     merged["calc_version"] = CALC_VERSION
 
     cols = [
         "asof_date", "ticker", "name", "market", "close", "mcap", "avg_value_20d", "turnover_20d",
-        "per", "pbr", "div", "eps", "bps", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
-        "dist_sma20", "dist_sma50", "dist_sma200", "high_52w", "low_52w", "pos_52w", "vol_20d",
-        "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "calc_version",
+        "per", "pbr", "div", "dps", "eps", "bps", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
+        "dist_sma20", "dist_sma50", "dist_sma200", "high_52w", "low_52w", "pos_52w", "near_52w_high_ratio",
+        "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_5y", "eps_yoy_q", "calc_version",
     ]
     return merged[cols]

@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS snapshot_metrics (
     per REAL,
     pbr REAL,
     div REAL,
+    dps REAL,
     eps REAL,
     bps REAL,
     roe_proxy REAL,
@@ -75,12 +76,15 @@ CREATE TABLE IF NOT EXISTS snapshot_metrics (
     high_52w REAL,
     low_52w REAL,
     pos_52w REAL,
+    near_52w_high_ratio REAL,
     vol_20d REAL,
     ret_1w REAL,
     ret_1m REAL,
     ret_3m REAL,
     ret_6m REAL,
     ret_1y REAL,
+    eps_cagr_5y REAL,
+    eps_yoy_q REAL,
     calc_version TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (asof_date, ticker)
@@ -110,9 +114,19 @@ def get_connection(db_path: str | Path) -> sqlite3.Connection:
     return conn
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
+    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+
+
 def init_db(db_path: str | Path) -> None:
     with get_connection(db_path) as conn:
         conn.executescript(SCHEMA)
+        _ensure_column(conn, "snapshot_metrics", "dps", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "near_52w_high_ratio", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "eps_yoy_q", "REAL")
         conn.commit()
 
 

@@ -101,21 +101,20 @@ class Repository:
                 return 0
             cols = [
                 "asof_date", "ticker", "name", "market", "close", "mcap", "avg_value_20d", "turnover_20d",
-                "per", "pbr", "div", "eps", "bps", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
-                "dist_sma20", "dist_sma50", "dist_sma200", "high_52w", "low_52w", "pos_52w", "vol_20d",
-                "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "calc_version",
+                "per", "pbr", "div", "dps", "eps", "bps", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
+                "dist_sma20", "dist_sma50", "dist_sma200", "high_52w", "low_52w", "pos_52w", "near_52w_high_ratio",
+                "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_5y", "eps_yoy_q", "calc_version",
             ]
             rows = frame[cols].to_records(index=False).tolist()
+            placeholders = ", ".join(["?"] * len(cols))
             conn.executemany(
-                """
+                f"""
                 INSERT INTO snapshot_metrics(
                     asof_date, ticker, name, market, close, mcap, avg_value_20d, turnover_20d,
-                    per, pbr, div, eps, bps, roe_proxy, eps_positive, sma20, sma50, sma200,
-                    dist_sma20, dist_sma50, dist_sma200, high_52w, low_52w, pos_52w, vol_20d,
-                    ret_1w, ret_1m, ret_3m, ret_6m, ret_1y, calc_version
-                ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                )
+                    per, pbr, div, dps, eps, bps, roe_proxy, eps_positive, sma20, sma50, sma200,
+                    dist_sma20, dist_sma50, dist_sma200, high_52w, low_52w, pos_52w, near_52w_high_ratio,
+                    vol_20d, ret_1w, ret_1m, ret_3m, ret_6m, ret_1y, eps_cagr_5y, eps_yoy_q, calc_version
+                ) VALUES ({placeholders})
                 """,
                 rows,
             )
@@ -141,7 +140,7 @@ class Repository:
         query = """
         SELECT t.ticker, t.name, t.market,
                c.mcap,
-               f.per, f.pbr, f.eps, f.bps, f.div
+               f.per, f.pbr, f.eps, f.bps, f.div, f.dps
         FROM ticker_master t
         LEFT JOIN cap_daily c ON c.ticker = t.ticker AND c.date = ?
         LEFT JOIN fundamental_daily f ON f.ticker = t.ticker AND f.date = ?
@@ -149,6 +148,18 @@ class Repository:
         """
         with db_session(self.db_path) as conn:
             return pd.read_sql_query(query, conn, params=(dt, dt))
+
+
+    def get_fundamental_window(self, end_date: str, years: int = 6) -> pd.DataFrame:
+        query = """
+        SELECT date, ticker, per, pbr, eps, bps, div, dps
+        FROM fundamental_daily
+        WHERE date <= ?
+          AND date >= date(?, ?)
+        ORDER BY ticker, date
+        """
+        with db_session(self.db_path) as conn:
+            return pd.read_sql_query(query, conn, params=(end_date, end_date, f"-{years} years"))
 
     def get_latest_snapshot_date(self) -> str | None:
         with db_session(self.db_path) as conn:
