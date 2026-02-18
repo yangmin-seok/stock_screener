@@ -33,7 +33,10 @@ class Repository:
     def upsert_prices(self, frame: pd.DataFrame) -> int:
         if frame.empty:
             return 0
-        rows = frame[["date", "ticker", "open", "high", "low", "close", "volume", "value"]].to_records(index=False).tolist()
+        data = frame.copy()
+        if "value" not in data.columns:
+            data["value"] = pd.NA
+        rows = data[["date", "ticker", "open", "high", "low", "close", "volume", "value"]].to_records(index=False).tolist()
         with db_session(self.db_path) as conn:
             conn.executemany(
                 """
@@ -123,10 +126,18 @@ class Repository:
     def get_price_window(self, end_date: str, window: int = 400) -> pd.DataFrame:
         query = """
         WITH ranked AS (
-            SELECT p.*,
-                   ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) AS rn
+            SELECT p.date,
+                   p.ticker,
+                   p.open,
+                   p.high,
+                   p.low,
+                   p.close,
+                   p.volume,
+                   COALESCE(c.value, p.value) AS value,
+                   ROW_NUMBER() OVER (PARTITION BY p.ticker ORDER BY p.date DESC) AS rn
             FROM prices_daily p
-            WHERE date <= ?
+            LEFT JOIN cap_daily c ON c.date = p.date AND c.ticker = p.ticker
+            WHERE p.date <= ?
         )
         SELECT date, ticker, open, high, low, close, volume, value
         FROM ranked

@@ -3,7 +3,7 @@ import pandas as pd
 from stock_screener.collectors.pykrx_client import PykrxCollector
 
 
-def test_normalize_ohlcv_fallback_value_from_close_volume():
+def test_normalize_ohlcv_allows_missing_value_column_without_crash():
     frame = pd.DataFrame(
         {
             "시가": [100],
@@ -15,7 +15,8 @@ def test_normalize_ohlcv_fallback_value_from_close_volume():
         index=pd.to_datetime(["2026-01-02"]),
     )
     out = PykrxCollector._normalize_ohlcv(frame)
-    assert out.loc[pd.Timestamp("2026-01-02"), "value"] == 105000
+    assert "value" in out.columns
+    assert pd.isna(out.loc[pd.Timestamp("2026-01-02"), "value"])
 
 
 def test_normalize_ohlcv_uses_existing_value_column():

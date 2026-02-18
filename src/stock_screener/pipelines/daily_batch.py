@@ -32,7 +32,6 @@ class DailyBatchPipeline:
     @staticmethod
     def _fundamental_backfill_dates(asof: date) -> list[date]:
         dates = {asof}
-        # For growth metrics: yearly(5y) and quarterly YoY anchors.
         for years in range(1, 6):
             dates.add(asof - timedelta(days=365 * years))
         quarter_ends = pd.period_range(end=pd.Timestamp(asof), periods=24, freq="Q")
@@ -48,12 +47,16 @@ class DailyBatchPipeline:
         ticker_count = self.repo.upsert_tickers(tickers)
 
         from_dt = dt - timedelta(days=lookback_days * 2)
+
         price_rows = 0
         for ticker in tickers["ticker"]:
             ohlcv = self.collector.ohlcv(from_dt, dt, ticker)
             price_rows += self.repo.upsert_prices(ohlcv)
 
-        cap_rows = self.repo.upsert_cap(self.collector.market_cap(dt))
+        # Root fix: trade value time-series is sourced from cap_daily (KRX 공식 거래대금)
+        cap_rows = 0
+        for trading_dt in self.collector.trading_dates(from_dt, dt):
+            cap_rows += self.repo.upsert_cap(self.collector.market_cap(trading_dt))
 
         fund_rows = 0
         for fdt in self._fundamental_backfill_dates(dt):

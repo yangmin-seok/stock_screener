@@ -49,12 +49,7 @@ class PykrxCollector:
             raise KeyError(f"Missing required OHLCV columns: {missing_required}. available={list(frame.columns)}")
 
         value_src = cls._pick_column(frame, colmap["value"])
-        if value_src is None:
-            # Some pykrx responses may omit 거래대금; use a conservative fallback.
-            out["value"] = out["close"].fillna(0) * out["volume"].fillna(0)
-        else:
-            out["value"] = pd.to_numeric(frame[value_src], errors="coerce")
-
+        out["value"] = pd.to_numeric(frame[value_src], errors="coerce") if value_src is not None else pd.NA
         return out
 
     def _retry(self, fn, *args, **kwargs):
@@ -76,6 +71,12 @@ class PykrxCollector:
                 return candidate
             candidate -= timedelta(days=1)
         raise RuntimeError("Could not determine business day")
+
+    def trading_dates(self, from_dt: date, to_dt: date) -> list[date]:
+        frame = self._retry(stock.get_market_ohlcv_by_date, self.fmt(from_dt), self.fmt(to_dt), "005930")
+        if frame.empty:
+            return []
+        return [ts.date() for ts in pd.to_datetime(frame.index).sort_values()]
 
     def tickers(self) -> pd.DataFrame:
         rows: list[dict] = []
@@ -110,7 +111,7 @@ class PykrxCollector:
         )
         for col in ("mcap", "shares", "volume", "value"):
             if col not in frame.columns:
-                frame[col] = 0
+                frame[col] = pd.NA
             frame[col] = pd.to_numeric(frame[col], errors="coerce")
         frame.index.name = "ticker"
         frame = frame.reset_index()[["ticker", "mcap", "shares", "volume", "value"]]
