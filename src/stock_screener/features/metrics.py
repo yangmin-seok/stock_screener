@@ -105,7 +105,7 @@ def build_snapshot(
 
     cols = [
         "asof_date", "ticker", "name", "market", "close", "mcap", "avg_value_20d", "turnover_20d",
-        "per", "pbr", "div", "dps", "eps", "bps", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
+        "per", "pbr", "div", "dps", "eps", "bps", "reserve_ratio", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
         "dist_sma20", "dist_sma50", "dist_sma200", "high_52w", "low_52w", "pos_52w", "near_52w_high_ratio",
         "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_5y", "eps_yoy_q", "calc_version",
     ]

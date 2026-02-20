@@ -85,12 +85,15 @@ class Repository:
     def upsert_fundamental(self, frame: pd.DataFrame) -> int:
         if frame.empty:
             return 0
-        rows = self._to_sql_records(frame, ["date", "ticker", "per", "pbr", "eps", "bps", "div", "dps"])
+        data = frame.copy()
+        if "reserve_ratio" not in data.columns:
+            data["reserve_ratio"] = pd.NA
+        rows = self._to_sql_records(data, ["date", "ticker", "per", "pbr", "eps", "bps", "div", "dps", "reserve_ratio"])
         with db_session(self.db_path) as conn:
             conn.executemany(
                 """
-                INSERT INTO fundamental_daily(date, ticker, per, pbr, eps, bps, div, dps, source_ts)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO fundamental_daily(date, ticker, per, pbr, eps, bps, div, dps, reserve_ratio, source_ts)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(date, ticker) DO UPDATE SET
                     per=excluded.per,
                     pbr=excluded.pbr,
@@ -98,6 +101,26 @@ class Repository:
                     bps=excluded.bps,
                     div=excluded.div,
                     dps=excluded.dps,
+                    reserve_ratio=COALESCE(excluded.reserve_ratio, fundamental_daily.reserve_ratio),
+                    source_ts=CURRENT_TIMESTAMP
+                """,
+                rows,
+            )
+        return len(rows)
+
+    def upsert_reserve_ratio(self, dt: str, frame: pd.DataFrame) -> int:
+        if frame.empty:
+            return 0
+        data = frame.copy()
+        data["date"] = dt
+        rows = self._to_sql_records(data, ["date", "ticker", "reserve_ratio"])
+        with db_session(self.db_path) as conn:
+            conn.executemany(
+                """
+                INSERT INTO fundamental_daily(date, ticker, reserve_ratio, source_ts)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(date, ticker) DO UPDATE SET
+                    reserve_ratio=excluded.reserve_ratio,
                     source_ts=CURRENT_TIMESTAMP
                 """,
                 rows,
@@ -111,7 +134,7 @@ class Repository:
                 return 0
             cols = [
                 "asof_date", "ticker", "name", "market", "close", "mcap", "avg_value_20d", "turnover_20d",
-                "per", "pbr", "div", "dps", "eps", "bps", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
+                "per", "pbr", "div", "dps", "eps", "bps", "reserve_ratio", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
                 "dist_sma20", "dist_sma50", "dist_sma200", "high_52w", "low_52w", "pos_52w", "near_52w_high_ratio",
                 "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_5y", "eps_yoy_q", "calc_version",
             ]
@@ -121,7 +144,7 @@ class Repository:
                 f"""
                 INSERT INTO snapshot_metrics(
                     asof_date, ticker, name, market, close, mcap, avg_value_20d, turnover_20d,
-                    per, pbr, div, dps, eps, bps, roe_proxy, eps_positive, sma20, sma50, sma200,
+                    per, pbr, div, dps, eps, bps, reserve_ratio, roe_proxy, eps_positive, sma20, sma50, sma200,
                     dist_sma20, dist_sma50, dist_sma200, high_52w, low_52w, pos_52w, near_52w_high_ratio,
                     vol_20d, ret_1w, ret_1m, ret_3m, ret_6m, ret_1y, eps_cagr_5y, eps_yoy_q, calc_version
                 ) VALUES ({placeholders})
@@ -158,7 +181,7 @@ class Repository:
         query = """
         SELECT t.ticker, t.name, t.market,
                c.mcap,
-               f.per, f.pbr, f.eps, f.bps, f.div, f.dps
+               f.per, f.pbr, f.eps, f.bps, f.div, f.dps, f.reserve_ratio
         FROM ticker_master t
         LEFT JOIN cap_daily c ON c.ticker = t.ticker AND c.date = ?
         LEFT JOIN fundamental_daily f ON f.ticker = t.ticker AND f.date = ?
@@ -170,7 +193,7 @@ class Repository:
 
     def get_fundamental_window(self, end_date: str, years: int = 6) -> pd.DataFrame:
         query = """
-        SELECT date, ticker, per, pbr, eps, bps, div, dps
+        SELECT date, ticker, per, pbr, eps, bps, div, dps, reserve_ratio
         FROM fundamental_daily
         WHERE date <= ?
           AND date >= date(?, ?)
@@ -189,6 +212,11 @@ class Repository:
         with db_session(self.db_path) as conn:
             row = conn.execute("SELECT COUNT(*) FROM ticker_master WHERE active_flag = 1").fetchone()
         return int(row[0]) if row and row[0] is not None else 0
+
+    def get_active_tickers(self) -> list[str]:
+        with db_session(self.db_path) as conn:
+            rows = conn.execute("SELECT ticker FROM ticker_master WHERE active_flag = 1 ORDER BY ticker").fetchall()
+        return [str(row[0]) for row in rows]
 
     def get_latest_snapshot_date(self) -> str | None:
         with db_session(self.db_path) as conn:

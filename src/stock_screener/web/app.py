@@ -22,12 +22,14 @@ st.caption("최초 실행 시 pykrx 수집으로 시간이 걸리며, 이후에�
 if "asof" not in st.session_state:
     st.session_state.asof = repo.get_latest_snapshot_date()
 
-c1, c2, c3 = st.columns([1, 1, 2])
+c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
 with c1:
     refresh_full = st.button("전체 수집 + 스냅샷", type="primary")
 with c2:
     refresh_snapshot = st.button("스냅샷만 재계산", help="이미 수집된 DB 데이터로 snapshot만 다시 계산")
 with c3:
+    refresh_reserve = st.button("유보율만 업데이트", help="네이버 크롤링으로 최신 유보율만 업데이트")
+with c4:
     force_date = st.date_input("asof date (optional)", value=None)
 
 target_asof = force_date.strftime("%Y-%m-%d") if force_date else None
@@ -49,6 +51,13 @@ if refresh_snapshot:
         st.success(f"스냅샷 재계산 완료: {result.asof_date} | snapshot {result.snapshot:,}건")
     except ValueError as exc:
         st.error(f"스냅샷만 재계산 실패: {exc}")
+
+if refresh_reserve:
+    with st.spinner("네이버 크롤링으로 유보율 업데이트 중..."):
+        updated_asof, updated_rows = pipeline.update_reserve_ratio_only(asof_date=target_asof)
+        pipeline.rebuild_snapshot_only(asof_date=updated_asof)
+    st.session_state.asof = updated_asof
+    st.success(f"유보율 업데이트 완료: {updated_asof} | reserve_ratio {updated_rows:,}건")
 
 asof = st.session_state.asof
 if not asof:
@@ -84,6 +93,9 @@ value_min = st.number_input(
 apply_pbr_max = st.checkbox("최대 PBR 적용", value=False)
 pbr_max = st.number_input("최대 PBR", min_value=0.0, value=1.0, step=0.1, disabled=not apply_pbr_max)
 
+apply_reserve_ratio_min = st.checkbox("최소 유보율(%) 적용", value=False)
+reserve_ratio_min = st.number_input("최소 유보율(%)", value=500.0, step=50.0, disabled=not apply_reserve_ratio_min)
+
 apply_roe_min = st.checkbox("최소 ROE proxy 적용", value=False)
 roe_min = st.number_input("최소 ROE proxy", value=0.1, step=0.01, disabled=not apply_roe_min)
 
@@ -113,6 +125,7 @@ active_filter_count = sum(
         int(apply_mcap_min),
         int(apply_value_min),
         int(apply_pbr_max),
+        int(apply_reserve_ratio_min),
         int(apply_roe_min),
         int(above_200ma),
         int(apply_eps_cagr_5y),
@@ -134,6 +147,8 @@ if apply_value_min:
     filtered = filtered[filtered["avg_value_20d"] >= value_min]
 if apply_pbr_max:
     filtered = filtered[(filtered["pbr"].notna()) & (filtered["pbr"] <= pbr_max)]
+if apply_reserve_ratio_min:
+    filtered = filtered[(filtered["reserve_ratio"].notna()) & (filtered["reserve_ratio"] >= reserve_ratio_min)]
 if apply_roe_min:
     filtered = filtered[(filtered["roe_proxy"].notna()) & (filtered["roe_proxy"] >= roe_min)]
 if above_200ma:
@@ -147,7 +162,7 @@ if apply_near_high:
 
 sort_col = st.selectbox(
     "정렬 컬럼",
-    ["mcap", "pbr", "roe_proxy", "ret_3m", "div", "avg_value_20d", "eps_cagr_5y", "eps_yoy_q", "near_52w_high_ratio"],
+    ["mcap", "pbr", "reserve_ratio", "roe_proxy", "ret_3m", "div", "avg_value_20d", "eps_cagr_5y", "eps_yoy_q", "near_52w_high_ratio"],
     index=0,
 )
 ascending = st.checkbox("오름차순", value=False)
@@ -159,7 +174,7 @@ if filtered.empty:
     st.warning("조건을 만족하는 종목이 없습니다. Growth 조건(EPS CAGR/EPS YoY) 임계값을 낮추거나 체크를 해제해 보세요.")
 
 show_cols = [
-    "ticker", "name", "market", "close", "mcap", "avg_value_20d", "pbr", "per", "div", "dps",
+    "ticker", "name", "market", "close", "mcap", "avg_value_20d", "pbr", "reserve_ratio", "per", "div", "dps",
     "eps", "bps", "roe_proxy", "eps_positive", "ret_3m", "ret_1y", "dist_sma200", "pos_52w",
     "near_52w_high_ratio", "eps_cagr_5y", "eps_yoy_q",
 ]

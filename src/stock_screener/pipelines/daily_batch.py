@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from stock_screener.collectors.pykrx_client import PykrxCollector
+from stock_screener.collectors.naver_ratio_client import NaverRatioCollector
 from stock_screener.features.metrics import build_snapshot
 from stock_screener.storage.db import init_db
 from stock_screener.storage.repository import Repository
@@ -32,6 +33,30 @@ class DailyBatchPipeline:
         init_db(self.db_path)
         self.repo = Repository(self.db_path)
         self.collector = PykrxCollector()
+        self.ratio_collector = NaverRatioCollector()
+
+    def update_reserve_ratio_only(self, asof_date: str | None = None) -> tuple[str, int]:
+        if asof_date:
+            dt = pd.to_datetime(asof_date).date()
+            asof_str = dt.strftime("%Y-%m-%d")
+        else:
+            latest_price_date = self.repo.get_latest_price_date()
+            latest_snapshot_date = self.repo.get_latest_snapshot_date()
+            asof_str = latest_price_date or latest_snapshot_date
+            if not asof_str:
+                asof_str = self.collector.recent_business_day().strftime("%Y-%m-%d")
+
+        tickers = self.repo.get_active_tickers()
+        if not tickers:
+            tickers_frame = self.collector.tickers()
+            self.repo.upsert_tickers(tickers_frame)
+            tickers = tickers_frame["ticker"].tolist()
+
+        logger.info("Starting reserve ratio update: asof=%s, tickers=%s", asof_str, len(tickers))
+        ratio_frame = self.ratio_collector.latest_reserve_ratio(tickers)
+        rows = self.repo.upsert_reserve_ratio(asof_str, ratio_frame)
+        logger.info("Reserve ratio update completed: asof=%s, rows=%s", asof_str, rows)
+        return asof_str, rows
 
     @staticmethod
     def _fundamental_backfill_dates(asof: date, trading_dates: list[date]) -> list[date]:
