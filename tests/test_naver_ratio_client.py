@@ -1,4 +1,4 @@
-import pandas as pd
+import time
 
 from stock_screener.collectors.naver_ratio_client import NaverRatioCollector
 
@@ -32,3 +32,30 @@ def test_latest_reserve_ratio_uses_parsed_values(monkeypatch):
     assert list(frame.columns) == ["ticker", "reserve_ratio"]
     assert len(frame) == 2
     assert frame.loc[frame["ticker"] == "1", "reserve_ratio"].iloc[0] == 1001
+
+
+def test_latest_reserve_ratio_preserves_input_order_with_concurrency(monkeypatch):
+    collector = NaverRatioCollector(max_workers=4)
+
+    def fake_fetch_html(ticker: str):
+        if ticker == "1":
+            time.sleep(0.03)
+        elif ticker == "2":
+            time.sleep(0.01)
+        return f"<th>유보율</th><td>{2000 + int(ticker)}</td>"
+
+    monkeypatch.setattr(collector, "_fetch_html", fake_fetch_html)
+    frame = collector.latest_reserve_ratio(["1", "2", "3"])
+
+    assert list(frame["ticker"]) == ["1", "2", "3"]
+    assert list(frame["reserve_ratio"]) == [2001, 2002, 2003]
+
+
+def test_is_blocked_response_detects_throttle_page():
+    html = "<html><body>비정상적인 접근이 감지되어 접근이 제한되었습니다.</body></html>"
+    assert NaverRatioCollector._is_blocked_response(html) is True
+
+
+def test_is_blocked_response_false_for_normal_html():
+    html = "<html><body><th>유보율</th><td>123.4</td></body></html>"
+    assert NaverRatioCollector._is_blocked_response(html) is False
