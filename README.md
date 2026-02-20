@@ -29,6 +29,17 @@ streamlit run src/stock_screener/web/app.py
 python -m stock_screener.cli --db-path data/screener.db
 ```
 
+## 유보율 업데이트
+- CLI에서 유보율만 갱신(네이버 크롤링):
+```bash
+python -m stock_screener.cli --db-path data/screener.db --update-reserve-only
+```
+- 유보율 갱신 후 스냅샷 재계산:
+```bash
+python -m stock_screener.cli --db-path data/screener.db --snapshot-only
+```
+- Streamlit UI에서도 `유보율만 업데이트` 버튼으로 동일 기능을 실행할 수 있습니다.
+
 
 ## 프리셋/필터 동작 방식
 - 프리셋은 자주 쓰는 3개 조건 묶음을 한 번에 적용하는 시작점입니다.
@@ -49,4 +60,3 @@ python -m stock_screener.cli --db-path data/screener.db
 - 가격/시총 수집 기간은 `asof_date - (lookback_days * 2)`부터 `asof_date`까지의 거래일입니다. 예: `lookback_days=400`, `asof=2026-02-13`이면 대략 2023년 말부터 조회됩니다.
 - EPS 성장률 계산용 펀더멘털은 별도로 최근 약 6년 구간에서 월말/분기말 거래일 앵커를 수집해, 5Y CAGR / YoY 계산에 필요한 히스토리를 확보합니다.
 - **스냅샷만 재계산**: DB에 가격/시총/펀더멘털이 이미 있으면 보통 수 초~수십 초 수준입니다(환경/데이터량 의존).
-
