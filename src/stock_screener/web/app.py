@@ -99,6 +99,8 @@ reserve_ratio_min = st.number_input("최소 유보율(%)", value=500.0, step=50.
 apply_roe_min = st.checkbox("최소 ROE proxy 적용", value=False)
 roe_min = st.number_input("최소 ROE proxy", value=0.1, step=0.01, disabled=not apply_roe_min)
 
+apply_eps_positive = st.checkbox("EPS 흑자 기업만(적자 제외)", value=False)
+
 above_200ma = st.checkbox("200일선 위 조건 적용", value=False)
 
 st.markdown("### Growth 조건 선택")
@@ -127,6 +129,7 @@ active_filter_count = sum(
         int(apply_pbr_max),
         int(apply_reserve_ratio_min),
         int(apply_roe_min),
+        int(apply_eps_positive),
         int(above_200ma),
         int(apply_eps_cagr_5y),
         int(apply_eps_yoy_q),
@@ -151,6 +154,8 @@ if apply_reserve_ratio_min:
     filtered = filtered[(filtered["reserve_ratio"].notna()) & (filtered["reserve_ratio"] >= reserve_ratio_min)]
 if apply_roe_min:
     filtered = filtered[(filtered["roe_proxy"].notna()) & (filtered["roe_proxy"] >= roe_min)]
+if apply_eps_positive:
+    filtered = filtered[filtered["eps_positive"] == 1]
 if above_200ma:
     filtered = filtered[filtered["dist_sma200"] >= 0]
 if apply_eps_cagr_5y:
