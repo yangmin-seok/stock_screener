@@ -3,8 +3,10 @@ from __future__ import annotations
 import logging
 import re
 import time
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from threading import Lock
 from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -21,24 +23,27 @@ class NaverRatioCollector:
     sleep_seconds: float = 0.5
     timeout_seconds: int = 8
     max_workers: int = 8
+    save_parse_miss_html: bool = True
+    parse_miss_html_path: str = "artifacts/naver_ratio_parse_miss_sample.html"
 
     @staticmethod
     def _extract_latest_reserve_ratio_from_html(html: str) -> float | None:
-        marker = "유보율"
-        idx = html.find(marker)
-        if idx < 0:
+        markers = ["유보율", "자본유보율"]
+        positions = [html.find(marker) for marker in markers if html.find(marker) >= 0]
+        if not positions:
             return None
 
-        snippet = html[max(0, idx - 3000): idx + 3000]
-        candidates = re.findall(r">\s*(-?\d+(?:,\d{3})*(?:\.\d+)?)\s*<", snippet)
         values: list[float] = []
-        for raw in candidates:
-            try:
-                v = float(raw.replace(",", ""))
-            except ValueError:
-                continue
-            if -1000.0 <= v <= 100000.0:
-                values.append(v)
+        for idx in positions:
+            snippet = html[max(0, idx - 3000): idx + 3000]
+
+            # Case 1: HTML table cells around the marker.
+            tag_numbers = re.findall(r">\s*(-?\d+(?:,\d{3})*(?:\.\d+)?)\s*<", snippet)
+            values.extend(NaverRatioCollector._parse_valid_numbers(tag_numbers))
+
+            # Case 2: Text-like output where marker is followed by a number (JS/plain text).
+            nearby_numbers = re.findall(r"유보율[^0-9-]{0,30}(-?\d+(?:,\d{3})*(?:\.\d+)?)", snippet)
+            values.extend(NaverRatioCollector._parse_valid_numbers(nearby_numbers))
 
         if not values:
             return None
@@ -47,6 +52,18 @@ class NaverRatioCollector:
         if positives:
             return positives[0]
         return values[0]
+
+    @staticmethod
+    def _parse_valid_numbers(raw_values: list[str]) -> list[float]:
+        values: list[float] = []
+        for raw in raw_values:
+            try:
+                v = float(raw.replace(",", ""))
+            except ValueError:
+                continue
+            if -1000.0 <= v <= 100000.0:
+                values.append(v)
+        return values
 
     @staticmethod
     def _is_blocked_response(html: str) -> bool:
@@ -62,6 +79,21 @@ class NaverRatioCollector:
     def _preview_html(html: str, max_chars: int = 120) -> str:
         compact = re.sub(r"\s+", " ", html)
         return compact[:max_chars]
+
+    @staticmethod
+    def _decode_response(raw: bytes, content_charset: str | None = None) -> str:
+        encodings: list[str] = []
+        if content_charset:
+            encodings.append(content_charset)
+        encodings.extend(["utf-8", "euc-kr", "cp949"])
+
+        for encoding in encodings:
+            try:
+                return raw.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+
+        return raw.decode("utf-8", errors="ignore")
 
     def _fetch_html(self, ticker: str) -> str | None:
         query = urlencode({"cmp_cd": ticker, "fin_typ": 0, "freq_typ": "Y"})
@@ -80,7 +112,9 @@ class NaverRatioCollector:
             try:
                 with urlopen(req, timeout=self.timeout_seconds) as resp:
                     raw = resp.read()
-                html = raw.decode("utf-8", errors="ignore")
+                    content_charset = resp.headers.get_content_charset()
+
+                html = self._decode_response(raw, content_charset)
                 if self._is_blocked_response(html):
                     last_error = RuntimeError("blocked-response")
                     if idx + 1 < self.retries:
@@ -95,6 +129,12 @@ class NaverRatioCollector:
         logger.warning("Failed to fetch Naver ratio page for ticker=%s: %s", ticker, last_error)
         return None
 
+
+    def _save_html_sample(self, ticker: str, html: str) -> None:
+        out_path = Path(self.parse_miss_html_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(f"<!-- ticker={ticker} -->\n{html}", encoding="utf-8")
+
     def latest_reserve_ratio(self, tickers: list[str]) -> pd.DataFrame:
         total = len(tickers)
         logger.info("Starting Naver reserve-ratio crawl: tickers=%s", total)
@@ -105,6 +145,8 @@ class NaverRatioCollector:
         done = 0
         parse_miss_examples = 0
         started_at = time.perf_counter()
+        html_sample_saved = False
+        html_sample_lock = Lock()
 
         def _collect_one(ticker: str) -> tuple[str, float | None, str | None, str | None]:
             html = self._fetch_html(ticker)
@@ -113,6 +155,12 @@ class NaverRatioCollector:
 
             ratio = self._extract_latest_reserve_ratio_from_html(html)
             if ratio is None:
+                if self.save_parse_miss_html:
+                    nonlocal html_sample_saved
+                    with html_sample_lock:
+                        if not html_sample_saved:
+                            self._save_html_sample(ticker, html)
+                            html_sample_saved = True
                 return ticker, None, "parse_miss", self._preview_html(html)
 
             return ticker, ratio, None, None
@@ -134,6 +182,8 @@ class NaverRatioCollector:
                             ticker,
                             preview,
                         )
+                        if self.save_parse_miss_html and html_sample_saved:
+                            logger.warning("Saved parse-miss HTML sample to %s", self.parse_miss_html_path)
                 elif ratio is not None:
                     rows[ticker] = ratio
 
