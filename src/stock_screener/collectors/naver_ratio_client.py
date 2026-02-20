@@ -65,15 +65,41 @@ class NaverRatioCollector:
         return None
 
     def latest_reserve_ratio(self, tickers: list[str]) -> pd.DataFrame:
+        total = len(tickers)
+        logger.info("Starting Naver reserve-ratio crawl: tickers=%s", total)
+
         rows: list[dict[str, object]] = []
+        failed_fetch = 0
+        missing_ratio = 0
         for ticker in tickers:
             html = self._fetch_html(ticker)
             if not html:
+                failed_fetch += 1
                 continue
             ratio = self._extract_latest_reserve_ratio_from_html(html)
             if ratio is None:
+                missing_ratio += 1
                 continue
             rows.append({"ticker": ticker, "reserve_ratio": ratio})
+
+            done = len(rows) + failed_fetch + missing_ratio
+            if done % 200 == 0 or done == total:
+                logger.info(
+                    "Reserve-ratio crawl progress: %s/%s (success=%s, fetch_fail=%s, parse_miss=%s)",
+                    done,
+                    total,
+                    len(rows),
+                    failed_fetch,
+                    missing_ratio,
+                )
+
+        logger.info(
+            "Reserve-ratio crawl completed: total=%s, success=%s, fetch_fail=%s, parse_miss=%s",
+            total,
+            len(rows),
+            failed_fetch,
+            missing_ratio,
+        )
 
         if not rows:
             return pd.DataFrame(columns=["ticker", "reserve_ratio"])
