@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS fundamental_daily (
     bps REAL,
     div REAL,
     dps REAL,
+    reserve_ratio REAL,
     source_ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (date, ticker)
 );
@@ -65,6 +66,7 @@ CREATE TABLE IF NOT EXISTS snapshot_metrics (
     dps REAL,
     eps REAL,
     bps REAL,
+    reserve_ratio REAL,
     roe_proxy REAL,
     eps_positive INTEGER,
     sma20 REAL,
@@ -124,6 +126,8 @@ def init_db(db_path: str | Path) -> None:
     with get_connection(db_path) as conn:
         conn.executescript(SCHEMA)
         _ensure_column(conn, "snapshot_metrics", "dps", "REAL")
+        _ensure_column(conn, "fundamental_daily", "reserve_ratio", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "reserve_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "near_52w_high_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_yoy_q", "REAL")
