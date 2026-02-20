@@ -112,6 +112,48 @@ class NaverRatioCollector:
 
         return raw.decode("utf-8", errors="ignore")
 
+    @staticmethod
+    def _parse_valid_numbers(raw_values: list[str]) -> list[float]:
+        values: list[float] = []
+        for raw in raw_values:
+            try:
+                v = float(raw.replace(",", ""))
+            except ValueError:
+                continue
+            if -1000.0 <= v <= 100000.0:
+                values.append(v)
+        return values
+
+    @staticmethod
+    def _is_blocked_response(html: str) -> bool:
+        blocked_markers = [
+            "비정상적인 접근",
+            "접근이 제한",
+            "Access Denied",
+            "자동화된 요청",
+        ]
+        return any(marker in html for marker in blocked_markers)
+
+    @staticmethod
+    def _preview_html(html: str, max_chars: int = 120) -> str:
+        compact = re.sub(r"\s+", " ", html)
+        return compact[:max_chars]
+
+    @staticmethod
+    def _decode_response(raw: bytes, content_charset: str | None = None) -> str:
+        encodings: list[str] = []
+        if content_charset:
+            encodings.append(content_charset)
+        encodings.extend(["utf-8", "euc-kr", "cp949"])
+
+        for encoding in encodings:
+            try:
+                return raw.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+
+        return raw.decode("utf-8", errors="ignore")
+
     def _fetch_html(self, ticker: str) -> str | None:
         query = urlencode({"cmp_cd": ticker, "fin_typ": 0, "freq_typ": "Y"})
         url = f"https://navercomp.wisereport.co.kr/v2/company/cF1001.aspx?{query}"
