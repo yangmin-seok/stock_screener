@@ -38,6 +38,10 @@ python -m stock_screener.cli --db-path data/screener.db --update-reserve-only
 ```bash
 python -m stock_screener.cli --db-path data/screener.db --snapshot-only
 ```
+- CLI 한 줄(유보율 업데이트 + 스냅샷 연속 실행):
+```bash
+python -m stock_screener.cli --db-path data/screener.db --update-reserve-only --rebuild-snapshot
+```
 - Streamlit UI에서도 `유보율만 업데이트` 버튼으로 동일 기능을 실행할 수 있습니다.
 
 
