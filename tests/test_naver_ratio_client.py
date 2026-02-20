@@ -104,6 +104,16 @@ def test_parse_miss_html_save_can_be_disabled(monkeypatch, tmp_path):
     assert not sample_path.exists()
 
 
+def test_extract_latest_reserve_ratio_with_status_parses_large_value():
+    html = """
+    <tr><th scope='row' class='line txt'>자본유보율</th>
+    <td class='num line'>133,443.80</td><td class='num line'>120,000.00</td></tr>
+    """
+    out, status = NaverRatioCollector._extract_latest_reserve_ratio_with_status(html)
+
+    assert status == "success"
+    assert out == 133443.8
+
 def test_extract_latest_reserve_ratio_with_status_no_data_for_blank_row():
     html = """
     <tr><th scope='row' class='line txt'>자본유보율</th>
