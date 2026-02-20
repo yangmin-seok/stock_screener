@@ -102,3 +102,27 @@ def test_parse_miss_html_save_can_be_disabled(monkeypatch, tmp_path):
     collector.latest_reserve_ratio(["1111"])
 
     assert not sample_path.exists()
+
+
+def test_extract_latest_reserve_ratio_with_status_no_data_for_blank_row():
+    html = """
+    <tr><th scope='row' class='line txt'>자본유보율</th>
+    <td class='num line'></td><td class='num line'></td><td class='num'></td></tr>
+    """
+    out, status = NaverRatioCollector._extract_latest_reserve_ratio_with_status(html)
+    assert out is None
+    assert status == "no_data"
+
+
+def test_no_data_does_not_save_parse_sample(monkeypatch, tmp_path):
+    sample_path = tmp_path / "sample-no-data.html"
+    collector = NaverRatioCollector(parse_miss_html_path=str(sample_path))
+
+    def fake_fetch_html(ticker: str):
+        return "<tr><th>자본유보율</th><td class='num'></td><td class='num'></td></tr>"
+
+    monkeypatch.setattr(collector, "_fetch_html", fake_fetch_html)
+    frame = collector.latest_reserve_ratio(["1111"])
+
+    assert frame.empty
+    assert not sample_path.exists()
