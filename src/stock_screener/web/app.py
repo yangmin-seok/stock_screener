@@ -74,44 +74,77 @@ st.write(f"현재 snapshot 종목 수: **{len(base):,}개**")
 st.markdown("### 조건 선택")
 st.caption("원하는 조건만 체크해서 적용하세요. 체크하지 않은 조건은 필터에 사용되지 않습니다.")
 
-mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), default=[])
+descriptive_tab, fundamental_tab, technical_tab = st.tabs(["Descriptive", "Fundamental", "Technical"])
 
-apply_mcap_min = st.checkbox("최소 시총(원) 적용", value=False)
-mcap_min = st.number_input("최소 시총(원)", min_value=0.0, value=0.0, step=100_000_000.0, disabled=not apply_mcap_min)
+with descriptive_tab:
+    mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), default=[], key="mkt")
 
-apply_value_min = st.checkbox("최소 20D 평균 거래대금(원) 적용", value=False)
-value_min = st.number_input(
-    "최소 20D 평균 거래대금(원)", min_value=0.0, value=0.0, step=100_000_000.0, disabled=not apply_value_min
-)
+    apply_mcap_min = st.checkbox("최소 시총(원) 적용", value=False, key="apply_mcap_min")
+    mcap_min = st.number_input(
+        "최소 시총(원)",
+        min_value=0.0,
+        value=0.0,
+        step=100_000_000.0,
+        disabled=not apply_mcap_min,
+        key="mcap_min",
+    )
 
-apply_pbr_max = st.checkbox("최대 PBR 적용", value=False)
-pbr_max = st.number_input("최대 PBR", min_value=0.0, value=1.0, step=0.1, disabled=not apply_pbr_max)
+    apply_value_min = st.checkbox("최소 20D 평균 거래대금(원) 적용", value=False, key="apply_value_min")
+    value_min = st.number_input(
+        "최소 20D 평균 거래대금(원)",
+        min_value=0.0,
+        value=0.0,
+        step=100_000_000.0,
+        disabled=not apply_value_min,
+        key="value_min",
+    )
 
-apply_reserve_ratio_min = st.checkbox("최소 유보율(%) 적용", value=False)
-reserve_ratio_min = st.number_input("최소 유보율(%)", value=500.0, step=50.0, disabled=not apply_reserve_ratio_min)
+with fundamental_tab:
+    apply_pbr_max = st.checkbox("최대 PBR 적용", value=False, key="apply_pbr_max")
+    pbr_max = st.number_input("최대 PBR", min_value=0.0, value=1.0, step=0.1, disabled=not apply_pbr_max, key="pbr_max")
 
-apply_roe_min = st.checkbox("최소 ROE proxy 적용", value=False)
-roe_min = st.number_input("최소 ROE proxy", value=0.1, step=0.01, disabled=not apply_roe_min)
+    apply_roe_min = st.checkbox("최소 ROE proxy 적용", value=False, key="apply_roe_min")
+    roe_min = st.number_input("최소 ROE proxy", value=0.1, step=0.01, disabled=not apply_roe_min, key="roe_min")
 
-apply_eps_positive = st.checkbox("EPS 흑자 기업만(적자 제외)", value=False)
+    apply_eps_positive = st.checkbox("EPS 흑자 기업만(적자 제외)", value=False, key="apply_eps_positive")
 
-above_200ma = st.checkbox("200일선 위 조건 적용", value=False)
+    apply_reserve_ratio_min = st.checkbox("최소 유보율(%) 적용", value=False, key="apply_reserve_ratio_min")
+    reserve_ratio_min = st.number_input(
+        "최소 유보율(%)", value=500.0, step=50.0, disabled=not apply_reserve_ratio_min, key="reserve_ratio_min"
+    )
 
-st.markdown("### Growth 조건 선택")
-apply_eps_cagr_5y = st.checkbox("최근 5년 EPS CAGR 조건 적용", value=False)
-eps_cagr_5y_min = st.number_input(
-    "최근 5년 EPS CAGR 최소", value=0.15, step=0.01, format="%.2f", disabled=not apply_eps_cagr_5y
-)
+    apply_eps_cagr_5y = st.checkbox("최근 5년 EPS CAGR 조건 적용", value=False, key="apply_eps_cagr_5y")
+    eps_cagr_5y_min = st.number_input(
+        "최근 5년 EPS CAGR 최소",
+        value=0.15,
+        step=0.01,
+        format="%.2f",
+        disabled=not apply_eps_cagr_5y,
+        key="eps_cagr_5y_min",
+    )
 
-apply_eps_yoy_q = st.checkbox("최근 분기 EPS YoY 조건 적용", value=False)
-eps_yoy_q_min = st.number_input(
-    "최근 분기 EPS YoY 최소", value=0.25, step=0.01, format="%.2f", disabled=not apply_eps_yoy_q
-)
+    apply_eps_yoy_q = st.checkbox("최근 분기 EPS YoY 조건 적용", value=False, key="apply_eps_yoy_q")
+    eps_yoy_q_min = st.number_input(
+        "최근 분기 EPS YoY 최소",
+        value=0.25,
+        step=0.01,
+        format="%.2f",
+        disabled=not apply_eps_yoy_q,
+        key="eps_yoy_q_min",
+    )
 
-apply_near_high = st.checkbox("현재가 / 52주 신고가 조건 적용", value=False)
-near_high_min = st.number_input(
-    "현재가 / 52주 신고가 최소", value=0.90, step=0.01, format="%.2f", disabled=not apply_near_high
-)
+with technical_tab:
+    above_200ma = st.checkbox("200일선 위 조건 적용", value=False, key="above_200ma")
+
+    apply_near_high = st.checkbox("현재가 / 52주 신고가 조건 적용", value=False, key="apply_near_high")
+    near_high_min = st.number_input(
+        "현재가 / 52주 신고가 최소",
+        value=0.90,
+        step=0.01,
+        format="%.2f",
+        disabled=not apply_near_high,
+        key="near_high_min",
+    )
 
 
 active_filter_count = sum(
