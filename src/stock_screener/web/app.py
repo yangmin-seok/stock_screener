@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import streamlit as st
@@ -77,6 +78,11 @@ st.caption("원하는 조건만 체크해서 적용하세요. 체크하지 않�
 descriptive_tab, fundamental_tab, technical_tab = st.tabs(["Descriptive", "Fundamental", "Technical"])
 
 with descriptive_tab:
+    ticker_input = st.text_input("티커 직접 입력", help="콤마(,) 또는 공백으로 여러 티커를 입력하세요.")
+
+    raw_tickers = [token.strip().upper() for token in re.split(r"[\s,]+", ticker_input or "") if token.strip()]
+    ticker_list = list(dict.fromkeys(raw_tickers))
+
     mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), default=[], key="mkt")
 
     apply_mcap_min = st.checkbox("최소 시총(원) 적용", value=False, key="apply_mcap_min")
@@ -149,6 +155,7 @@ with technical_tab:
 
 active_filter_count = sum(
     [
+        int(bool(ticker_list)),
         int(bool(mkt)),
         int(apply_mcap_min),
         int(apply_value_min),
@@ -165,6 +172,12 @@ active_filter_count = sum(
 st.caption(f"적용 중인 조건 수: {active_filter_count}개")
 
 filtered = base.copy()
+missing_tickers: list[str] = []
+if ticker_list:
+    available_tickers = set(filtered["ticker"].astype(str).str.strip().str.upper())
+    missing_tickers = [ticker for ticker in ticker_list if ticker not in available_tickers]
+    filtered = filtered[filtered["ticker"].astype(str).str.strip().str.upper().isin(ticker_list)]
+
 if mkt:
     filtered = filtered[filtered["market"].isin(mkt)]
 if apply_mcap_min:
@@ -197,6 +210,11 @@ ascending = st.checkbox("오름차순", value=False)
 limit = st.slider("출력 개수", min_value=10, max_value=500, value=100, step=10)
 
 filtered = filtered.sort_values(sort_col, ascending=ascending).head(limit)
+
+if ticker_list:
+    st.caption(f"티커 직접 입력: {len(ticker_list)}개 중 {len(ticker_list) - len(missing_tickers)}개 매칭")
+    if missing_tickers:
+        st.warning("snapshot에 없는 티커: " + ", ".join(missing_tickers))
 
 if filtered.empty:
     st.warning("조건을 만족하는 종목이 없습니다. Growth 조건(EPS CAGR/EPS YoY) 임계값을 낮추거나 체크를 해제해 보세요.")
