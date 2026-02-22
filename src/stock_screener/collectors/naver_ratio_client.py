@@ -34,25 +34,32 @@ class NaverRatioCollector:
     @staticmethod
     def _extract_latest_reserve_ratio_with_status(html: str) -> tuple[float | None, str]:
         # Prefer row-based parse: distinguish "no data" (blank cells) from parse errors.
-        row_match = re.search(
-            r"<tr[^>]*>\s*<th[^>]*>\s*(?:자본유보율|유보율)\s*</th>(.*?)</tr>",
-            html,
-            flags=re.S,
-        )
-        if row_match:
-            row_html = row_match.group(1)
-            td_cells = re.findall(r"<td[^>]*>(.*?)</td>", row_html, flags=re.S)
+        # Naver tables can include extra tags inside <th> (e.g. <span>), so match by stripped text.
+        for tr_html in re.findall(r"<tr[^>]*>(.*?)</tr>", html, flags=re.S):
+            th_match = re.search(r"<th[^>]*>(.*?)</th>", tr_html, flags=re.S)
+            if not th_match:
+                continue
+
+            header_text = re.sub(r"<[^>]+>", "", th_match.group(1)).strip()
+            if header_text not in {"자본유보율", "유보율"}:
+                continue
+
+            td_cells = re.findall(r"<td[^>]*>(.*?)</td>", tr_html, flags=re.S)
             normalized = [re.sub(r"<[^>]+>", "", cell).strip() for cell in td_cells]
             if normalized and all(not v or v == "-" for v in normalized):
                 return None, "no_data"
 
-            row_numbers: list[str] = []
+            cell_values: list[float] = []
             for value in normalized:
-                row_numbers.extend(re.findall(r"-?\d+(?:,\d{3})*(?:\.\d+)?", value))
-            values = NaverRatioCollector._parse_valid_numbers(row_numbers)
-            if values:
-                positives = [v for v in values if v > 0]
-                return (positives[0] if positives else values[0]), "success"
+                numbers = re.findall(r"-?\d+(?:,\d{3})*(?:\.\d+)?", value)
+                parsed = NaverRatioCollector._parse_valid_numbers(numbers)
+                if parsed:
+                    cell_values.append(parsed[0])
+
+            if cell_values:
+                positives = [v for v in cell_values if v > 0]
+                # The most recent period is usually the right-most TD cell.
+                return (positives[-1] if positives else cell_values[-1]), "success"
             return None, "parse_error"
 
         # Fallback: marker-near scanning for variants of content format.
