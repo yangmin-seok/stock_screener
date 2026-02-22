@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlencode
 
 import streamlit as st
 
@@ -18,6 +21,137 @@ pipeline = DailyBatchPipeline(DB_PATH)
 st.set_page_config(layout="wide", page_title="KR Fundamental Screener")
 st.title("🇰🇷 한국 주식 Fundamental Screener (pykrx + SQLite cache)")
 st.caption("최초 실행 시 pykrx 수집으로 시간이 걸리며, 이후에는 DB snapshot을 재사용합니다.")
+
+
+@dataclass(frozen=True)
+class FilterSpec:
+    name: str
+    ftype: str
+    default: Any
+
+
+FILTER_SPECS: list[FilterSpec] = [
+    FilterSpec("ticker_input", "str", ""),
+    FilterSpec("mkt", "list", []),
+    FilterSpec("apply_mcap_min", "bool", False),
+    FilterSpec("mcap_min", "float", 0.0),
+    FilterSpec("apply_value_min", "bool", False),
+    FilterSpec("value_min", "float", 0.0),
+    FilterSpec("apply_pbr_max", "bool", False),
+    FilterSpec("pbr_max", "float", 1.0),
+    FilterSpec("apply_roe_min", "bool", False),
+    FilterSpec("roe_min", "float", 0.1),
+    FilterSpec("apply_eps_positive", "bool", False),
+    FilterSpec("apply_reserve_ratio_min", "bool", False),
+    FilterSpec("reserve_ratio_min", "float", 500.0),
+    FilterSpec("apply_eps_cagr_5y", "bool", False),
+    FilterSpec("eps_cagr_5y_min", "float", 0.15),
+    FilterSpec("apply_eps_yoy_q", "bool", False),
+    FilterSpec("eps_yoy_q_min", "float", 0.25),
+    FilterSpec("above_200ma", "bool", False),
+    FilterSpec("apply_near_high", "bool", False),
+    FilterSpec("near_high_min", "float", 0.9),
+    FilterSpec("sort_col", "str", "mcap"),
+    FilterSpec("ascending", "bool", False),
+    FilterSpec("limit", "int", 100),
+]
+
+
+def _get_query_params() -> dict[str, Any]:
+    if hasattr(st, "query_params"):
+        return dict(st.query_params)
+    return st.experimental_get_query_params()
+
+
+def _set_query_params(params: dict[str, Any]) -> None:
+    if hasattr(st, "query_params"):
+        qp = st.query_params
+        qp.clear()
+        for key, value in params.items():
+            qp[key] = value
+        return
+    st.experimental_set_query_params(**params)
+
+
+def _parse_bool(raw: Any, *, default: bool) -> bool:
+    if raw is None:
+        return default
+    value = raw[0] if isinstance(raw, list) and raw else raw
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    raise ValueError(f"invalid bool: {value}")
+
+
+def _parse_num(raw: Any, cast_type: type[int] | type[float], *, default: int | float) -> int | float:
+    if raw is None:
+        return default
+    value = raw[0] if isinstance(raw, list) and raw else raw
+    try:
+        return cast_type(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid {cast_type.__name__}: {value}") from exc
+
+
+def _parse_list(raw: Any, *, default: list[str]) -> list[str]:
+    if raw is None:
+        return default
+    values = raw if isinstance(raw, list) else str(raw).split(",")
+    return [item.strip() for item in values if str(item).strip()]
+
+
+def _parse_str(raw: Any, *, default: str) -> str:
+    if raw is None:
+        return default
+    if isinstance(raw, list):
+        return str(raw[0]) if raw else default
+    return str(raw)
+
+
+def _parse_query_filter_value(spec: FilterSpec, query_params: dict[str, Any]) -> Any:
+    raw = query_params.get(spec.name)
+    if spec.ftype == "bool":
+        return _parse_bool(raw, default=spec.default)
+    if spec.ftype == "int":
+        return _parse_num(raw, int, default=spec.default)
+    if spec.ftype == "float":
+        return _parse_num(raw, float, default=spec.default)
+    if spec.ftype == "list":
+        return _parse_list(raw, default=list(spec.default))
+    return _parse_str(raw, default=spec.default)
+
+
+def _serialize_query_filter_value(spec: FilterSpec, value: Any) -> str | list[str] | None:
+    if value == spec.default or value in (None, ""):
+        return None
+    if spec.ftype == "bool":
+        return "1" if bool(value) else "0"
+    if spec.ftype in {"int", "float", "str"}:
+        return str(value)
+    if spec.ftype == "list":
+        values = [str(item).strip() for item in value if str(item).strip()]
+        return values if values else None
+    return None
+
+
+query_params = _get_query_params()
+if "query_params_restored" not in st.session_state:
+    st.session_state.query_parse_errors = []
+    for spec in FILTER_SPECS:
+        try:
+            st.session_state[spec.name] = _parse_query_filter_value(spec, query_params)
+        except ValueError:
+            st.session_state[spec.name] = spec.default
+            st.session_state.query_parse_errors.append(spec.name)
+    st.session_state.query_params_restored = True
+
+if st.session_state.get("query_parse_errors"):
+    st.warning(
+        "일부 URL 필터값을 복원하지 못해 기본값으로 대체했습니다: "
+        + ", ".join(st.session_state.query_parse_errors)
+    )
 
 if "asof" not in st.session_state:
     st.session_state.asof = repo.get_latest_snapshot_date()
@@ -78,61 +212,61 @@ st.caption("원하는 조건만 체크해서 적용하세요. 체크하지 않�
 descriptive_tab, fundamental_tab, technical_tab = st.tabs(["Descriptive", "Fundamental", "Technical"])
 
 with descriptive_tab:
-    ticker_input = st.text_input("티커 직접 입력", help="콤마(,) 또는 공백으로 여러 티커를 입력하세요.")
+    ticker_input = st.text_input("티커 직접 입력", help="콤마(,) 또는 공백으로 여러 티커를 입력하세요.", key="ticker_input")
 
     raw_tickers = [token.strip().upper() for token in re.split(r"[\s,]+", ticker_input or "") if token.strip()]
     ticker_list = list(dict.fromkeys(raw_tickers))
 
-    mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), default=[], key="mkt")
+    mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), key="mkt")
 
-    apply_mcap_min = st.checkbox("최소 시총(원) 적용", value=False, key="apply_mcap_min")
+    apply_mcap_min = st.checkbox("최소 시총(원) 적용", key="apply_mcap_min")
     mcap_min = st.number_input(
         "최소 시총(원)",
         min_value=0.0,
-        value=0.0,
+
         step=100_000_000.0,
         disabled=not apply_mcap_min,
         key="mcap_min",
     )
 
-    apply_value_min = st.checkbox("최소 20D 평균 거래대금(원) 적용", value=False, key="apply_value_min")
+    apply_value_min = st.checkbox("최소 20D 평균 거래대금(원) 적용", key="apply_value_min")
     value_min = st.number_input(
         "최소 20D 평균 거래대금(원)",
         min_value=0.0,
-        value=0.0,
+
         step=100_000_000.0,
         disabled=not apply_value_min,
         key="value_min",
     )
 
 with fundamental_tab:
-    apply_pbr_max = st.checkbox("최대 PBR 적용", value=False, key="apply_pbr_max")
-    pbr_max = st.number_input("최대 PBR", min_value=0.0, value=1.0, step=0.1, disabled=not apply_pbr_max, key="pbr_max")
+    apply_pbr_max = st.checkbox("최대 PBR 적용", key="apply_pbr_max")
+    pbr_max = st.number_input("최대 PBR", min_value=0.0, step=0.1, disabled=not apply_pbr_max, key="pbr_max")
 
-    apply_roe_min = st.checkbox("최소 ROE proxy 적용", value=False, key="apply_roe_min")
-    roe_min = st.number_input("최소 ROE proxy", value=0.1, step=0.01, disabled=not apply_roe_min, key="roe_min")
+    apply_roe_min = st.checkbox("최소 ROE proxy 적용", key="apply_roe_min")
+    roe_min = st.number_input("최소 ROE proxy", step=0.01, disabled=not apply_roe_min, key="roe_min")
 
-    apply_eps_positive = st.checkbox("EPS 흑자 기업만(적자 제외)", value=False, key="apply_eps_positive")
+    apply_eps_positive = st.checkbox("EPS 흑자 기업만(적자 제외)", key="apply_eps_positive")
 
-    apply_reserve_ratio_min = st.checkbox("최소 유보율(%) 적용", value=False, key="apply_reserve_ratio_min")
+    apply_reserve_ratio_min = st.checkbox("최소 유보율(%) 적용", key="apply_reserve_ratio_min")
     reserve_ratio_min = st.number_input(
-        "최소 유보율(%)", value=500.0, step=50.0, disabled=not apply_reserve_ratio_min, key="reserve_ratio_min"
+        "최소 유보율(%)", step=50.0, disabled=not apply_reserve_ratio_min, key="reserve_ratio_min"
     )
 
-    apply_eps_cagr_5y = st.checkbox("최근 5년 EPS CAGR 조건 적용", value=False, key="apply_eps_cagr_5y")
+    apply_eps_cagr_5y = st.checkbox("최근 5년 EPS CAGR 조건 적용", key="apply_eps_cagr_5y")
     eps_cagr_5y_min = st.number_input(
         "최근 5년 EPS CAGR 최소",
-        value=0.15,
+
         step=0.01,
         format="%.2f",
         disabled=not apply_eps_cagr_5y,
         key="eps_cagr_5y_min",
     )
 
-    apply_eps_yoy_q = st.checkbox("최근 분기 EPS YoY 조건 적용", value=False, key="apply_eps_yoy_q")
+    apply_eps_yoy_q = st.checkbox("최근 분기 EPS YoY 조건 적용", key="apply_eps_yoy_q")
     eps_yoy_q_min = st.number_input(
         "최근 분기 EPS YoY 최소",
-        value=0.25,
+
         step=0.01,
         format="%.2f",
         disabled=not apply_eps_yoy_q,
@@ -140,12 +274,12 @@ with fundamental_tab:
     )
 
 with technical_tab:
-    above_200ma = st.checkbox("200일선 위 조건 적용", value=False, key="above_200ma")
+    above_200ma = st.checkbox("200일선 위 조건 적용", key="above_200ma")
 
-    apply_near_high = st.checkbox("현재가 / 52주 신고가 조건 적용", value=False, key="apply_near_high")
+    apply_near_high = st.checkbox("현재가 / 52주 신고가 조건 적용", key="apply_near_high")
     near_high_min = st.number_input(
         "현재가 / 52주 신고가 최소",
-        value=0.90,
+
         step=0.01,
         format="%.2f",
         disabled=not apply_near_high,
@@ -204,10 +338,23 @@ if apply_near_high:
 sort_col = st.selectbox(
     "정렬 컬럼",
     ["mcap", "pbr", "reserve_ratio", "roe_proxy", "ret_3m", "div", "avg_value_20d", "eps_cagr_5y", "eps_yoy_q", "near_52w_high_ratio"],
-    index=0,
+    key="sort_col",
 )
-ascending = st.checkbox("오름차순", value=False)
-limit = st.slider("출력 개수", min_value=10, max_value=500, value=100, step=10)
+ascending = st.checkbox("오름차순", key="ascending")
+limit = st.slider("출력 개수", min_value=10, max_value=500, step=10, key="limit")
+
+query_filter_state: dict[str, Any] = {}
+for spec in FILTER_SPECS:
+    serialized = _serialize_query_filter_value(spec, st.session_state.get(spec.name, spec.default))
+    if serialized is not None:
+        query_filter_state[spec.name] = serialized
+_set_query_params(query_filter_state)
+
+share_query_string = urlencode(query_filter_state, doseq=True)
+share_link = f"?{share_query_string}" if share_query_string else ""
+st.caption("필터 상태가 URL에 자동 반영됩니다. 링크를 복사해 동일한 조건을 공유할 수 있습니다.")
+st.code(share_link or "(기본 필터 상태: 공유할 추가 파라미터 없음)", language="text")
+st.button("공유 링크 복사", disabled=True, help="브라우저 주소창 URL을 복사해 공유하세요.")
 
 filtered = filtered.sort_values(sort_col, ascending=ascending).head(limit)
 
