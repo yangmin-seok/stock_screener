@@ -38,6 +38,10 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("mcap_bucket", "str", "any"),
     FilterSpec("mcap_min", "float", 0.0),
     FilterSpec("mcap_max", "float", 0.0),
+    FilterSpec("price_mode", "str", "any"),
+    FilterSpec("price_bucket", "str", "any"),
+    FilterSpec("price_min", "float", 0.0),
+    FilterSpec("price_max", "float", 0.0),
     FilterSpec("apply_value_min", "bool", False),
     FilterSpec("value_min", "float", 0.0),
     FilterSpec("apply_pbr_max", "bool", False),
@@ -76,6 +80,25 @@ MCAP_BUCKETS: list[dict[str, Any]] = [
 
 MCAP_BUCKET_MAP = {bucket["key"]: (bucket["min_mcap"], bucket["max_mcap"]) for bucket in MCAP_BUCKETS}
 MCAP_BUCKET_LABEL_MAP = {bucket["key"]: bucket["label"] for bucket in MCAP_BUCKETS}
+
+PRICE_MODES: dict[str, str] = {
+    "any": "Any",
+    "bucket": "구간선택",
+    "custom": "Custom",
+}
+
+PRICE_BUCKETS: list[dict[str, Any]] = [
+    {"key": "any", "label": "전체", "min_price": None, "max_price": None},
+    {"key": "under_5000", "label": "5,000원 미만", "min_price": None, "max_price": 5_000.0},
+    {"key": "5000_10000", "label": "5,000원~10,000원", "min_price": 5_000.0, "max_price": 10_000.0},
+    {"key": "10000_30000", "label": "10,000원~30,000원", "min_price": 10_000.0, "max_price": 30_000.0},
+    {"key": "30000_70000", "label": "30,000원~70,000원", "min_price": 30_000.0, "max_price": 70_000.0},
+    {"key": "70000_150000", "label": "70,000원~150,000원", "min_price": 70_000.0, "max_price": 150_000.0},
+    {"key": "over_150000", "label": "150,000원 이상", "min_price": 150_000.0, "max_price": None},
+]
+
+PRICE_BUCKET_MAP = {bucket["key"]: (bucket["min_price"], bucket["max_price"]) for bucket in PRICE_BUCKETS}
+PRICE_BUCKET_LABEL_MAP = {bucket["key"]: bucket["label"] for bucket in PRICE_BUCKETS}
 
 
 def _get_query_params() -> dict[str, Any]:
@@ -187,6 +210,12 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("mcap_bucket") not in MCAP_BUCKET_MAP:
         st.session_state.mcap_bucket = "any"
         st.session_state.query_parse_errors.append("mcap_bucket")
+    if st.session_state.get("price_mode") not in PRICE_MODES:
+        st.session_state.price_mode = "any"
+        st.session_state.query_parse_errors.append("price_mode")
+    if st.session_state.get("price_bucket") not in PRICE_BUCKET_MAP:
+        st.session_state.price_bucket = "any"
+        st.session_state.query_parse_errors.append("price_bucket")
     st.session_state.query_params_restored = True
 
 if st.session_state.get("query_parse_errors"):
@@ -318,6 +347,37 @@ with descriptive_tab:
         key="mcap_max",
     )
 
+    price_mode = st.selectbox(
+        "가격 필터",
+        options=list(PRICE_MODES.keys()),
+        format_func=lambda mode: PRICE_MODES[mode],
+        key="price_mode",
+    )
+
+    price_bucket = st.selectbox(
+        "가격 구간",
+        options=[bucket["key"] for bucket in PRICE_BUCKETS],
+        format_func=lambda key: PRICE_BUCKET_LABEL_MAP[key],
+        disabled=price_mode != "bucket",
+        key="price_bucket",
+    )
+
+    custom_price_mode = price_mode == "custom"
+    price_min = st.number_input(
+        "최소 가격(원)",
+        min_value=0.0,
+        step=100.0,
+        disabled=not custom_price_mode,
+        key="price_min",
+    )
+    price_max = st.number_input(
+        "최대 가격(원)",
+        min_value=0.0,
+        step=100.0,
+        disabled=not custom_price_mode,
+        key="price_max",
+    )
+
     apply_value_min = st.checkbox("최소 20D 평균 거래대금(원) 적용", key="apply_value_min")
     value_min = st.number_input(
         "최소 20D 평균 거래대금(원)",
@@ -381,6 +441,7 @@ active_filter_count = sum(
         int(bool(ticker_list)),
         int(bool(mkt)),
         int(mcap_mode != "any"),
+        int(price_mode != "any"),
         int(apply_value_min),
         int(apply_pbr_max),
         int(apply_reserve_ratio_min),
@@ -417,6 +478,22 @@ if mcap_filter_min is not None:
     filtered = filtered[filtered["mcap"] >= mcap_filter_min]
 if mcap_filter_max is not None:
     filtered = filtered[filtered["mcap"] < mcap_filter_max]
+
+price_filter_min: float | None = None
+price_filter_max: float | None = None
+if price_mode == "bucket":
+    price_filter_min, price_filter_max = PRICE_BUCKET_MAP[price_bucket]
+elif price_mode == "custom":
+    price_filter_min = price_min if price_min > 0 else None
+    price_filter_max = price_max if price_max > 0 else None
+    if price_filter_min is not None and price_filter_max is not None and price_filter_min >= price_filter_max:
+        st.warning("Custom 가격 범위가 올바르지 않습니다. 최대 가격은 최소 가격보다 커야 합니다.")
+
+if price_filter_min is not None:
+    filtered = filtered[filtered["close"] >= price_filter_min]
+if price_filter_max is not None:
+    filtered = filtered[filtered["close"] < price_filter_max]
+
 if apply_value_min:
     filtered = filtered[filtered["avg_value_20d"] >= value_min]
 if apply_pbr_max:
@@ -459,6 +536,16 @@ if mcap_mode != "bucket":
 if mcap_mode == "custom":
     query_filter_state["mcap_min"] = str(mcap_min)
     query_filter_state["mcap_max"] = str(mcap_max)
+
+if price_mode != "custom":
+    query_filter_state.pop("price_min", None)
+    query_filter_state.pop("price_max", None)
+if price_mode != "bucket":
+    query_filter_state.pop("price_bucket", None)
+
+if price_mode == "custom":
+    query_filter_state["price_min"] = str(price_min)
+    query_filter_state["price_max"] = str(price_max)
 
 _set_query_params(query_filter_state)
 
