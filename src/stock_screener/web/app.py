@@ -5,7 +5,6 @@ from pathlib import Path
 import streamlit as st
 
 from stock_screener.pipelines.daily_batch import DailyBatchPipeline
-from stock_screener.screener.dsl import apply_filters, preset_conditions
 from stock_screener.storage.db import init_db
 from stock_screener.storage.repository import Repository
 
@@ -72,13 +71,8 @@ if base.empty:
 st.subheader(f"Snapshot as of {asof}")
 st.write(f"현재 snapshot 종목 수: **{len(base):,}개**")
 
-preset = st.selectbox(
-    "프리셋",
-    ["none", "deep_value", "rerating", "dividend_lowvol", "momentum", "eps_growth_breakout"],
-)
-
 st.markdown("### 조건 선택")
-st.caption("원하는 조건만 체크해서 적용하세요. 체크하지 않은 조건은 필터에 사용되지 않습니다. 프리셋 `none`은 프리셋 조건을 적용하지 않는 모드입니다.")
+st.caption("원하는 조건만 체크해서 적용하세요. 체크하지 않은 조건은 필터에 사용되지 않습니다.")
 
 mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), default=[])
 
@@ -122,7 +116,6 @@ near_high_min = st.number_input(
 
 active_filter_count = sum(
     [
-        int(preset != "none"),
         int(bool(mkt)),
         int(apply_mcap_min),
         int(apply_value_min),
@@ -139,9 +132,6 @@ active_filter_count = sum(
 st.caption(f"적용 중인 조건 수: {active_filter_count}개")
 
 filtered = base.copy()
-if preset != "none":
-    filtered = apply_filters(filtered, preset_conditions(preset))
-
 if mkt:
     filtered = filtered[filtered["market"].isin(mkt)]
 if apply_mcap_min:
