@@ -92,6 +92,8 @@ def build_snapshot(
     denom = merged["high_52w"] - merged["low_52w"]
     merged["pos_52w"] = np.where(denom > 0, (merged["close"] - merged["low_52w"]) / denom, np.nan)
     merged["near_52w_high_ratio"] = np.where(merged["high_52w"] > 0, merged["close"] / merged["high_52w"], np.nan)
+    merged["current_value"] = merged["value"]
+    merged["relative_value"] = np.where(merged["avg_value_20d"] > 0, merged["current_value"] / merged["avg_value_20d"], np.nan)
     merged["turnover_20d"] = merged["avg_value_20d"] / merged["mcap"]
 
     growth = merged[["ticker"]].copy()
@@ -104,7 +106,7 @@ def build_snapshot(
     merged["calc_version"] = CALC_VERSION
 
     cols = [
-        "asof_date", "ticker", "name", "market", "close", "mcap", "avg_value_20d", "turnover_20d",
+        "asof_date", "ticker", "name", "market", "close", "mcap", "avg_value_20d", "current_value", "relative_value", "turnover_20d",
         "per", "pbr", "div", "dps", "eps", "bps", "reserve_ratio", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
         "dist_sma20", "dist_sma50", "dist_sma200", "high_52w", "low_52w", "pos_52w", "near_52w_high_ratio",
         "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_5y", "eps_yoy_q", "calc_version",
