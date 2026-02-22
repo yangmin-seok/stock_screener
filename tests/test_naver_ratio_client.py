@@ -112,7 +112,20 @@ def test_extract_latest_reserve_ratio_with_status_parses_large_value():
     out, status = NaverRatioCollector._extract_latest_reserve_ratio_with_status(html)
 
     assert status == "success"
-    assert out == 133443.8
+    assert out == 120000.0
+
+def test_extract_latest_reserve_ratio_with_status_supports_nested_th_and_uses_latest_column():
+    html = """
+    <tr>
+      <th scope='row' class='line txt'><span>자본유보율</span></th>
+      <td class='num'>133,158.88</td><td class='num'>89,793.21</td>
+    </tr>
+    """
+    out, status = NaverRatioCollector._extract_latest_reserve_ratio_with_status(html)
+
+    assert status == "success"
+    assert out == 89793.21
+
 
 def test_extract_latest_reserve_ratio_with_status_no_data_for_blank_row():
     html = """
