@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import re
+import multiprocessing as mp
+import queue
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -159,6 +162,13 @@ def _set_query_params(params: dict[str, Any]) -> None:
     st.experimental_set_query_params(**params)
 
 
+def _safe_rerun() -> None:
+    if hasattr(st, "rerun"):
+        st.rerun()
+        return
+    st.experimental_rerun()
+
+
 def _parse_bool(raw: Any, *, default: bool) -> bool:
     if raw is None:
         return default
@@ -222,19 +232,111 @@ def _serialize_query_filter_value(spec: FilterSpec, value: Any) -> str | list[st
     return None
 
 
-def _run_action_with_progress(action_label: str, callback):
-    progress_text = st.empty()
-    progress_bar = st.progress(0)
-    progress_text.info(f"{action_label}: 요청 접수")
-    progress_bar.progress(15)
-    progress_text.info(f"{action_label}: 작업 실행 중")
-    progress_bar.progress(45)
-    result = callback()
-    progress_text.info(f"{action_label}: 결과 반영 중")
-    progress_bar.progress(85)
-    progress_bar.progress(100)
-    progress_text.success(f"{action_label}: 완료")
-    return result
+def _job_worker(db_path: str, job_type: str, asof_date: str | None, result_queue: mp.Queue) -> None:
+    worker_pipeline = DailyBatchPipeline(Path(db_path))
+    try:
+        if job_type == "full_refresh":
+            result = worker_pipeline.run(asof_date=None)
+            result_queue.put({"status": "success", "job_type": job_type, "result": result.__dict__})
+            return
+
+        if job_type in {"snapshot_refresh", "auto_snapshot_sync"}:
+            result = worker_pipeline.rebuild_snapshot_only(asof_date=asof_date)
+            result_queue.put({"status": "success", "job_type": job_type, "result": result.__dict__})
+            return
+
+        if job_type == "reserve_refresh":
+            updated_asof, updated_rows = worker_pipeline.update_reserve_ratio_only(asof_date=asof_date)
+            snap_result = worker_pipeline.rebuild_snapshot_only(asof_date=updated_asof)
+            result_queue.put(
+                {
+                    "status": "success",
+                    "job_type": job_type,
+                    "updated_asof": updated_asof,
+                    "updated_rows": updated_rows,
+                    "snapshot_rows": snap_result.snapshot,
+                }
+            )
+            return
+
+        result_queue.put({"status": "error", "job_type": job_type, "error": f"Unknown job type: {job_type}"})
+    except Exception as exc:  # noqa: BLE001
+        result_queue.put({"status": "error", "job_type": job_type, "error": str(exc)})
+
+
+def _start_background_job(job_type: str, label: str, asof_date: str | None) -> None:
+    active_job = st.session_state.get("active_job")
+    if active_job and active_job["process"].is_alive():
+        st.warning("다른 작업이 이미 실행 중입니다. 완료되거나 취소 후 다시 시도하세요.")
+        return
+
+    result_queue: mp.Queue = mp.Queue()
+    process = mp.Process(target=_job_worker, args=(str(DB_PATH), job_type, asof_date, result_queue), daemon=True)
+    process.start()
+    st.session_state.active_job = {
+        "job_type": job_type,
+        "label": label,
+        "asof_date": asof_date,
+        "process": process,
+        "result_queue": result_queue,
+        "started_at": time.time(),
+    }
+
+
+def _poll_background_job() -> None:
+    active_job = st.session_state.get("active_job")
+    if not active_job:
+        return
+
+    process = active_job["process"]
+    result_queue = active_job["result_queue"]
+    if process.is_alive():
+        return
+
+    process.join(timeout=0.2)
+    message: dict[str, Any]
+    try:
+        message = result_queue.get_nowait()
+    except queue.Empty:
+        message = {"status": "error", "job_type": active_job["job_type"], "error": "작업 결과를 읽지 못했습니다."}
+
+    st.session_state.last_job_message = message
+    st.session_state.active_job = None
+
+    if message.get("status") == "success":
+        if message.get("job_type") in {"full_refresh", "snapshot_refresh", "auto_snapshot_sync"}:
+            result = message.get("result", {})
+            st.session_state.asof = result.get("asof_date")
+            if message.get("job_type") == "auto_snapshot_sync" and result.get("asof_date"):
+                st.session_state.auto_snapshot_synced_for = result["asof_date"]
+        elif message.get("job_type") == "reserve_refresh":
+            st.session_state.asof = message.get("updated_asof")
+
+
+def _render_active_job_panel() -> None:
+    active_job = st.session_state.get("active_job")
+    if not active_job:
+        return
+
+    elapsed = int(time.time() - active_job["started_at"])
+    st.info(f"{active_job['label']} 실행 중... ({elapsed}초 경과)")
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        if st.button("진행상태 새로고침", key="refresh_active_job"):
+            _safe_rerun()
+    with c2:
+        if st.button("작업 취소", type="secondary", key="cancel_active_job"):
+            process = active_job["process"]
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=1)
+            st.session_state.active_job = None
+            st.session_state.last_job_message = {
+                "status": "cancelled",
+                "job_type": active_job["job_type"],
+                "message": f"{active_job['label']} 작업을 취소했습니다.",
+            }
+            _safe_rerun()
 
 
 query_params = _get_query_params()
@@ -278,6 +380,37 @@ if st.session_state.get("query_parse_errors"):
         + ", ".join(st.session_state.query_parse_errors)
     )
 
+_poll_background_job()
+
+last_job_message = st.session_state.pop("last_job_message", None)
+if last_job_message:
+    status = last_job_message.get("status")
+    job_type = last_job_message.get("job_type")
+    if status == "success":
+        if job_type == "full_refresh":
+            result = last_job_message.get("result", {})
+            st.success(
+                f"전체 수집 완료: {result.get('asof_date')} | 티커 {result.get('tickers', 0)}개 | "
+                f"prices {result.get('prices', 0):,}건 | cap {result.get('cap', 0):,}건 | "
+                f"fundamental {result.get('fundamental', 0):,}건 | snapshot {result.get('snapshot', 0):,}건"
+            )
+        elif job_type in {"snapshot_refresh", "auto_snapshot_sync"}:
+            result = last_job_message.get("result", {})
+            if job_type == "auto_snapshot_sync":
+                st.success(f"최신 거래일 snapshot 자동 동기화 완료: {result.get('asof_date')}")
+            else:
+                st.success(f"스냅샷 재계산 완료: {result.get('asof_date')} | snapshot {result.get('snapshot', 0):,}건")
+        elif job_type == "reserve_refresh":
+            st.success(
+                f"유보율 업데이트 완료: {last_job_message.get('updated_asof')} | "
+                f"reserve_ratio {last_job_message.get('updated_rows', 0):,}건 | "
+                f"snapshot {last_job_message.get('snapshot_rows', 0):,}건"
+            )
+    elif status == "cancelled":
+        st.warning(last_job_message.get("message", "작업이 취소되었습니다."))
+    else:
+        st.error(f"작업 실패({job_type}): {last_job_message.get('error', '알 수 없는 오류')}")
+
 if "asof" not in st.session_state:
     st.session_state.asof = repo.get_latest_price_date() or repo.get_latest_snapshot_date()
 
@@ -285,18 +418,12 @@ latest_price_date = repo.get_latest_price_date()
 latest_snapshot_date = repo.get_latest_snapshot_date()
 if latest_price_date and latest_price_date != latest_snapshot_date:
     auto_sync_target = latest_price_date
-    if st.session_state.get("auto_snapshot_synced_for") != auto_sync_target:
-        try:
-            with st.spinner(f"최신 거래일({auto_sync_target}) snapshot 자동 재계산 중..."):
-                auto_result = _run_action_with_progress(
-                    "최신 거래일 snapshot 자동 동기화",
-                    lambda: pipeline.rebuild_snapshot_only(asof_date=auto_sync_target),
-                )
-            st.session_state.asof = auto_result.asof_date
-            st.session_state.auto_snapshot_synced_for = auto_sync_target
-            st.success(f"최신 거래일 snapshot 자동 동기화 완료: {auto_result.asof_date}")
-        except ValueError as exc:
-            st.warning(f"최신 거래일 snapshot 자동 동기화 실패: {exc}")
+    active_job = st.session_state.get("active_job")
+    if st.session_state.get("auto_snapshot_synced_for") != auto_sync_target and not active_job:
+        _start_background_job("auto_snapshot_sync", "최신 거래일 snapshot 자동 동기화", auto_sync_target)
+        _safe_rerun()
+
+_render_active_job_panel()
 
 c1, c2, c3 = st.columns([1, 1, 1])
 with c1:
@@ -307,39 +434,16 @@ with c3:
     refresh_reserve = st.button("유보율만 업데이트", help="네이버 크롤링으로 최신 유보율만 업데이트")
 
 if refresh_full:
-    with st.spinner("pykrx 전체 수집 + snapshot 생성 중... (초기 1회 느림)"):
-        result = _run_action_with_progress("전체 수집 + 스냅샷", lambda: pipeline.run(asof_date=None))
-    st.session_state.asof = result.asof_date
-    st.success(
-        f"전체 수집 완료: {result.asof_date} | 티커 {result.tickers}개 | "
-        f"prices {result.prices:,}건 | cap {result.cap:,}건 | fundamental {result.fundamental:,}건 | snapshot {result.snapshot:,}건"
-    )
+    _start_background_job("full_refresh", "전체 수집 + 스냅샷", None)
+    _safe_rerun()
 
 if refresh_snapshot:
-    try:
-        with st.spinner("DB 캐시 기반 snapshot만 재계산 중..."):
-            result = _run_action_with_progress(
-                "스냅샷 재계산",
-                lambda: pipeline.rebuild_snapshot_only(asof_date=repo.get_latest_price_date()),
-            )
-        st.session_state.asof = result.asof_date
-        st.success(f"스냅샷 재계산 완료: {result.asof_date} | snapshot {result.snapshot:,}건")
-    except ValueError as exc:
-        st.error(f"스냅샷만 재계산 실패: {exc}")
+    _start_background_job("snapshot_refresh", "스냅샷 재계산", repo.get_latest_price_date())
+    _safe_rerun()
 
 if refresh_reserve:
-    with st.spinner("네이버 크롤링으로 유보율 업데이트 중..."):
-        update_result = _run_action_with_progress(
-            "유보율 업데이트",
-            lambda: pipeline.update_reserve_ratio_only(asof_date=repo.get_latest_price_date()),
-        )
-        updated_asof, updated_rows = update_result
-        _run_action_with_progress(
-            "유보율 반영 snapshot 재계산",
-            lambda: pipeline.rebuild_snapshot_only(asof_date=updated_asof),
-        )
-    st.session_state.asof = updated_asof
-    st.success(f"유보율 업데이트 완료: {updated_asof} | reserve_ratio {updated_rows:,}건")
+    _start_background_job("reserve_refresh", "유보율 업데이트 + 스냅샷 재계산", repo.get_latest_price_date())
+    _safe_rerun()
 
 asof = st.session_state.asof
 if not asof:
