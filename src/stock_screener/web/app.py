@@ -34,8 +34,10 @@ class FilterSpec:
 FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("ticker_input", "str", ""),
     FilterSpec("mkt", "list", []),
-    FilterSpec("apply_mcap_min", "bool", False),
+    FilterSpec("mcap_mode", "str", "any"),
+    FilterSpec("mcap_bucket", "str", "any"),
     FilterSpec("mcap_min", "float", 0.0),
+    FilterSpec("mcap_max", "float", 0.0),
     FilterSpec("apply_value_min", "bool", False),
     FilterSpec("value_min", "float", 0.0),
     FilterSpec("apply_pbr_max", "bool", False),
@@ -56,6 +58,24 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("ascending", "bool", False),
     FilterSpec("limit", "int", 100),
 ]
+
+MCAP_MODES: dict[str, str] = {
+    "any": "Any",
+    "bucket": "구간선택",
+    "custom": "Custom",
+}
+
+MCAP_BUCKETS: list[dict[str, Any]] = [
+    {"key": "any", "label": "전체", "min_mcap": None, "max_mcap": None},
+    {"key": "mega", "label": "초대형주 (10조 이상)", "min_mcap": 10_000_000_000_000.0, "max_mcap": None},
+    {"key": "large", "label": "대형주 (2조~10조)", "min_mcap": 2_000_000_000_000.0, "max_mcap": 10_000_000_000_000.0},
+    {"key": "mid", "label": "중형주 (3천억~2조)", "min_mcap": 300_000_000_000.0, "max_mcap": 2_000_000_000_000.0},
+    {"key": "small", "label": "소형주 (5백억~3천억)", "min_mcap": 50_000_000_000.0, "max_mcap": 300_000_000_000.0},
+    {"key": "micro", "label": "초소형주 (5백억 미만)", "min_mcap": None, "max_mcap": 50_000_000_000.0},
+]
+
+MCAP_BUCKET_MAP = {bucket["key"]: (bucket["min_mcap"], bucket["max_mcap"]) for bucket in MCAP_BUCKETS}
+MCAP_BUCKET_LABEL_MAP = {bucket["key"]: bucket["label"] for bucket in MCAP_BUCKETS}
 
 
 def _get_query_params() -> dict[str, Any]:
@@ -161,6 +181,12 @@ if "query_params_restored" not in st.session_state:
         except ValueError:
             st.session_state[spec.name] = spec.default
             st.session_state.query_parse_errors.append(spec.name)
+    if st.session_state.get("mcap_mode") not in MCAP_MODES:
+        st.session_state.mcap_mode = "any"
+        st.session_state.query_parse_errors.append("mcap_mode")
+    if st.session_state.get("mcap_bucket") not in MCAP_BUCKET_MAP:
+        st.session_state.mcap_bucket = "any"
+        st.session_state.query_parse_errors.append("mcap_bucket")
     st.session_state.query_params_restored = True
 
 if st.session_state.get("query_parse_errors"):
@@ -260,14 +286,36 @@ with descriptive_tab:
 
     mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), key="mkt")
 
-    apply_mcap_min = st.checkbox("최소 시총(원) 적용", key="apply_mcap_min")
+    mcap_mode = st.radio(
+        "시총 필터 모드",
+        options=list(MCAP_MODES.keys()),
+        format_func=lambda mode: MCAP_MODES[mode],
+        horizontal=True,
+        key="mcap_mode",
+    )
+
+    mcap_bucket = st.selectbox(
+        "시총 구간",
+        options=[bucket["key"] for bucket in MCAP_BUCKETS],
+        format_func=lambda key: MCAP_BUCKET_LABEL_MAP[key],
+        disabled=mcap_mode != "bucket",
+        key="mcap_bucket",
+    )
+
+    custom_mode = mcap_mode == "custom"
     mcap_min = st.number_input(
         "최소 시총(원)",
         min_value=0.0,
-
         step=100_000_000.0,
-        disabled=not apply_mcap_min,
+        disabled=not custom_mode,
         key="mcap_min",
+    )
+    mcap_max = st.number_input(
+        "최대 시총(원)",
+        min_value=0.0,
+        step=100_000_000.0,
+        disabled=not custom_mode,
+        key="mcap_max",
     )
 
     apply_value_min = st.checkbox("최소 20D 평균 거래대금(원) 적용", key="apply_value_min")
@@ -332,7 +380,7 @@ active_filter_count = sum(
     [
         int(bool(ticker_list)),
         int(bool(mkt)),
-        int(apply_mcap_min),
+        int(mcap_mode != "any"),
         int(apply_value_min),
         int(apply_pbr_max),
         int(apply_reserve_ratio_min),
@@ -355,8 +403,20 @@ if ticker_list:
 
 if mkt:
     filtered = filtered[filtered["market"].isin(mkt)]
-if apply_mcap_min:
-    filtered = filtered[filtered["mcap"] >= mcap_min]
+mcap_filter_min: float | None = None
+mcap_filter_max: float | None = None
+if mcap_mode == "bucket":
+    mcap_filter_min, mcap_filter_max = MCAP_BUCKET_MAP[mcap_bucket]
+elif mcap_mode == "custom":
+    mcap_filter_min = mcap_min if mcap_min > 0 else None
+    mcap_filter_max = mcap_max if mcap_max > 0 else None
+    if mcap_filter_min is not None and mcap_filter_max is not None and mcap_filter_min >= mcap_filter_max:
+        st.warning("Custom 시총 범위가 올바르지 않습니다. 최대 시총은 최소 시총보다 커야 합니다.")
+
+if mcap_filter_min is not None:
+    filtered = filtered[filtered["mcap"] >= mcap_filter_min]
+if mcap_filter_max is not None:
+    filtered = filtered[filtered["mcap"] < mcap_filter_max]
 if apply_value_min:
     filtered = filtered[filtered["avg_value_20d"] >= value_min]
 if apply_pbr_max:
@@ -389,6 +449,17 @@ for spec in FILTER_SPECS:
     serialized = _serialize_query_filter_value(spec, st.session_state.get(spec.name, spec.default))
     if serialized is not None:
         query_filter_state[spec.name] = serialized
+
+if mcap_mode != "custom":
+    query_filter_state.pop("mcap_min", None)
+    query_filter_state.pop("mcap_max", None)
+if mcap_mode != "bucket":
+    query_filter_state.pop("mcap_bucket", None)
+
+if mcap_mode == "custom":
+    query_filter_state["mcap_min"] = str(mcap_min)
+    query_filter_state["mcap_max"] = str(mcap_max)
+
 _set_query_params(query_filter_state)
 
 share_query_string = urlencode(query_filter_state, doseq=True)
