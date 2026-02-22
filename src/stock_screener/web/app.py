@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import re
+import multiprocessing as mp
+import queue
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -33,8 +36,18 @@ class FilterSpec:
 FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("ticker_input", "str", ""),
     FilterSpec("mkt", "list", []),
-    FilterSpec("apply_mcap_min", "bool", False),
-    FilterSpec("mcap_min", "float", 0.0),
+    FilterSpec("mcap_filter_mode", "str", "Any"),
+    FilterSpec("mcap_bucket", "str", "전체"),
+    FilterSpec("mcap_min_custom", "float", 0.0),
+    FilterSpec("mcap_max_custom", "float", 0.0),
+    FilterSpec("price_filter_mode", "str", "Any"),
+    FilterSpec("price_bucket", "str", "전체"),
+    FilterSpec("price_min_custom", "float", 0.0),
+    FilterSpec("price_max_custom", "float", 0.0),
+    FilterSpec("div_filter_mode", "str", "Any"),
+    FilterSpec("div_bucket", "str", "전체"),
+    FilterSpec("div_min_custom", "float", 0.0),
+    FilterSpec("div_max_custom", "float", 0.0),
     FilterSpec("apply_value_min", "bool", False),
     FilterSpec("value_min", "float", 0.0),
     FilterSpec("apply_pbr_max", "bool", False),
@@ -56,6 +69,44 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("limit", "int", 100),
 ]
 
+MCAP_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "Nano (<500억)": (None, 50_000_000_000),
+    "Micro (500억~3,000억)": (50_000_000_000, 300_000_000_000),
+    "Small (3,000억~2조)": (300_000_000_000, 2_000_000_000_000),
+    "Mid (2조~10조)": (2_000_000_000_000, 10_000_000_000_000),
+    "Large (10조~50조)": (10_000_000_000_000, 50_000_000_000_000),
+    "Mega (50조 이상)": (50_000_000_000_000, None),
+    "+Large (10조 이상)": (10_000_000_000_000, None),
+    "+Mid (2조 이상)": (2_000_000_000_000, None),
+    "-Small (2조 미만)": (None, 2_000_000_000_000),
+}
+
+PRICE_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "1,000원 미만": (None, 1_000),
+    "1,000원~5,000원": (1_000, 5_000),
+    "5,000원~10,000원": (5_000, 10_000),
+    "10,000원~50,000원": (10_000, 50_000),
+    "50,000원~100,000원": (50_000, 100_000),
+    "100,000원 이상": (100_000, None),
+}
+
+DIV_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "무배당(0%)": (0.0, 0.0),
+    "배당주(0% 초과)": (0.000001, None),
+    "1% 이상": (1.0, None),
+    "2% 이상": (2.0, None),
+    "3% 이상": (3.0, None),
+    "5% 이상": (5.0, None),
+}
+
+# Keep explicit mode constants to avoid key drift and to support legacy state migration.
+MCAP_MODES = ("Any", "구간 선택", "직접 입력")
+PRICE_MODES = ("Any", "구간 선택", "직접 입력")
+DIV_MODES = ("Any", "구간 선택", "직접 입력")
+
 
 def _get_query_params() -> dict[str, Any]:
     if hasattr(st, "query_params"):
@@ -71,6 +122,13 @@ def _set_query_params(params: dict[str, Any]) -> None:
             qp[key] = value
         return
     st.experimental_set_query_params(**params)
+
+
+def _safe_rerun() -> None:
+    if hasattr(st, "rerun"):
+        st.rerun()
+        return
+    st.experimental_rerun()
 
 
 def _parse_bool(raw: Any, *, default: bool) -> bool:
@@ -136,6 +194,113 @@ def _serialize_query_filter_value(spec: FilterSpec, value: Any) -> str | list[st
     return None
 
 
+def _job_worker(db_path: str, job_type: str, asof_date: str | None, result_queue: mp.Queue) -> None:
+    worker_pipeline = DailyBatchPipeline(Path(db_path))
+    try:
+        if job_type == "full_refresh":
+            result = worker_pipeline.run(asof_date=None)
+            result_queue.put({"status": "success", "job_type": job_type, "result": result.__dict__})
+            return
+
+        if job_type in {"snapshot_refresh", "auto_snapshot_sync"}:
+            result = worker_pipeline.rebuild_snapshot_only(asof_date=asof_date)
+            result_queue.put({"status": "success", "job_type": job_type, "result": result.__dict__})
+            return
+
+        if job_type == "reserve_refresh":
+            updated_asof, updated_rows = worker_pipeline.update_reserve_ratio_only(asof_date=asof_date)
+            snap_result = worker_pipeline.rebuild_snapshot_only(asof_date=updated_asof)
+            result_queue.put(
+                {
+                    "status": "success",
+                    "job_type": job_type,
+                    "updated_asof": updated_asof,
+                    "updated_rows": updated_rows,
+                    "snapshot_rows": snap_result.snapshot,
+                }
+            )
+            return
+
+        result_queue.put({"status": "error", "job_type": job_type, "error": f"Unknown job type: {job_type}"})
+    except Exception as exc:  # noqa: BLE001
+        result_queue.put({"status": "error", "job_type": job_type, "error": str(exc)})
+
+
+def _start_background_job(job_type: str, label: str, asof_date: str | None) -> None:
+    active_job = st.session_state.get("active_job")
+    if active_job and active_job["process"].is_alive():
+        st.warning("다른 작업이 이미 실행 중입니다. 완료되거나 취소 후 다시 시도하세요.")
+        return
+
+    result_queue: mp.Queue = mp.Queue()
+    process = mp.Process(target=_job_worker, args=(str(DB_PATH), job_type, asof_date, result_queue), daemon=True)
+    process.start()
+    st.session_state.active_job = {
+        "job_type": job_type,
+        "label": label,
+        "asof_date": asof_date,
+        "process": process,
+        "result_queue": result_queue,
+        "started_at": time.time(),
+    }
+
+
+def _poll_background_job() -> None:
+    active_job = st.session_state.get("active_job")
+    if not active_job:
+        return
+
+    process = active_job["process"]
+    result_queue = active_job["result_queue"]
+    if process.is_alive():
+        return
+
+    process.join(timeout=0.2)
+    message: dict[str, Any]
+    try:
+        message = result_queue.get_nowait()
+    except queue.Empty:
+        message = {"status": "error", "job_type": active_job["job_type"], "error": "작업 결과를 읽지 못했습니다."}
+
+    st.session_state.last_job_message = message
+    st.session_state.active_job = None
+
+    if message.get("status") == "success":
+        if message.get("job_type") in {"full_refresh", "snapshot_refresh", "auto_snapshot_sync"}:
+            result = message.get("result", {})
+            st.session_state.asof = result.get("asof_date")
+            if message.get("job_type") == "auto_snapshot_sync" and result.get("asof_date"):
+                st.session_state.auto_snapshot_synced_for = result["asof_date"]
+        elif message.get("job_type") == "reserve_refresh":
+            st.session_state.asof = message.get("updated_asof")
+
+
+def _render_active_job_panel() -> None:
+    active_job = st.session_state.get("active_job")
+    if not active_job:
+        return
+
+    elapsed = int(time.time() - active_job["started_at"])
+    st.info(f"{active_job['label']} 실행 중... ({elapsed}초 경과)")
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        if st.button("진행상태 새로고침", key="refresh_active_job"):
+            _safe_rerun()
+    with c2:
+        if st.button("작업 취소", type="secondary", key="cancel_active_job"):
+            process = active_job["process"]
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=1)
+            st.session_state.active_job = None
+            st.session_state.last_job_message = {
+                "status": "cancelled",
+                "job_type": active_job["job_type"],
+                "message": f"{active_job['label']} 작업을 취소했습니다.",
+            }
+            _safe_rerun()
+
+
 query_params = _get_query_params()
 if "query_params_restored" not in st.session_state:
     st.session_state.query_parse_errors = []
@@ -153,45 +318,92 @@ if st.session_state.get("query_parse_errors"):
         + ", ".join(st.session_state.query_parse_errors)
     )
 
-if "asof" not in st.session_state:
-    st.session_state.asof = repo.get_latest_snapshot_date()
+# Backward compatibility: migrate legacy session/query keys when older links/state are loaded.
+if "mcap_mode" in st.session_state and "mcap_filter_mode" not in st.session_state:
+    st.session_state.mcap_filter_mode = st.session_state.get("mcap_mode", "Any")
+if "price_mode" in st.session_state and "price_filter_mode" not in st.session_state:
+    st.session_state.price_filter_mode = st.session_state.get("price_mode", "Any")
+if "div_mode" in st.session_state and "div_filter_mode" not in st.session_state:
+    st.session_state.div_filter_mode = st.session_state.get("div_mode", "Any")
 
-c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
+if st.session_state.get("mcap_filter_mode") not in MCAP_MODES:
+    st.session_state.mcap_filter_mode = "Any"
+if st.session_state.get("price_filter_mode") not in PRICE_MODES:
+    st.session_state.price_filter_mode = "Any"
+if st.session_state.get("div_filter_mode") not in DIV_MODES:
+    st.session_state.div_filter_mode = "Any"
+
+if st.session_state.get("mcap_bucket") not in MCAP_BUCKETS:
+    st.session_state.mcap_bucket = "전체"
+if st.session_state.get("price_bucket") not in PRICE_BUCKETS:
+    st.session_state.price_bucket = "전체"
+if st.session_state.get("div_bucket") not in DIV_BUCKETS:
+    st.session_state.div_bucket = "전체"
+
+_poll_background_job()
+
+last_job_message = st.session_state.pop("last_job_message", None)
+if last_job_message:
+    status = last_job_message.get("status")
+    job_type = last_job_message.get("job_type")
+    if status == "success":
+        if job_type == "full_refresh":
+            result = last_job_message.get("result", {})
+            st.success(
+                f"전체 수집 완료: {result.get('asof_date')} | 티커 {result.get('tickers', 0)}개 | "
+                f"prices {result.get('prices', 0):,}건 | cap {result.get('cap', 0):,}건 | "
+                f"fundamental {result.get('fundamental', 0):,}건 | snapshot {result.get('snapshot', 0):,}건"
+            )
+        elif job_type in {"snapshot_refresh", "auto_snapshot_sync"}:
+            result = last_job_message.get("result", {})
+            if job_type == "auto_snapshot_sync":
+                st.success(f"최신 거래일 snapshot 자동 동기화 완료: {result.get('asof_date')}")
+            else:
+                st.success(f"스냅샷 재계산 완료: {result.get('asof_date')} | snapshot {result.get('snapshot', 0):,}건")
+        elif job_type == "reserve_refresh":
+            st.success(
+                f"유보율 업데이트 완료: {last_job_message.get('updated_asof')} | "
+                f"reserve_ratio {last_job_message.get('updated_rows', 0):,}건 | "
+                f"snapshot {last_job_message.get('snapshot_rows', 0):,}건"
+            )
+    elif status == "cancelled":
+        st.warning(last_job_message.get("message", "작업이 취소되었습니다."))
+    else:
+        st.error(f"작업 실패({job_type}): {last_job_message.get('error', '알 수 없는 오류')}")
+
+if "asof" not in st.session_state:
+    st.session_state.asof = repo.get_latest_price_date() or repo.get_latest_snapshot_date()
+
+latest_price_date = repo.get_latest_price_date()
+latest_snapshot_date = repo.get_latest_snapshot_date()
+if latest_price_date and latest_price_date != latest_snapshot_date:
+    auto_sync_target = latest_price_date
+    active_job = st.session_state.get("active_job")
+    if st.session_state.get("auto_snapshot_synced_for") != auto_sync_target and not active_job:
+        _start_background_job("auto_snapshot_sync", "최신 거래일 snapshot 자동 동기화", auto_sync_target)
+        _safe_rerun()
+
+_render_active_job_panel()
+
+c1, c2, c3 = st.columns([1, 1, 1])
 with c1:
     refresh_full = st.button("전체 수집 + 스냅샷", type="primary")
 with c2:
     refresh_snapshot = st.button("스냅샷만 재계산", help="이미 수집된 DB 데이터로 snapshot만 다시 계산")
 with c3:
     refresh_reserve = st.button("유보율만 업데이트", help="네이버 크롤링으로 최신 유보율만 업데이트")
-with c4:
-    force_date = st.date_input("asof date (optional)", value=None)
-
-target_asof = force_date.strftime("%Y-%m-%d") if force_date else None
 
 if refresh_full:
-    with st.spinner("pykrx 전체 수집 + snapshot 생성 중... (초기 1회 느림)"):
-        result = pipeline.run(asof_date=target_asof)
-    st.session_state.asof = result.asof_date
-    st.success(
-        f"전체 수집 완료: {result.asof_date} | 티커 {result.tickers}개 | "
-        f"prices {result.prices:,}건 | cap {result.cap:,}건 | fundamental {result.fundamental:,}건 | snapshot {result.snapshot:,}건"
-    )
+    _start_background_job("full_refresh", "전체 수집 + 스냅샷", None)
+    _safe_rerun()
 
 if refresh_snapshot:
-    try:
-        with st.spinner("DB 캐시 기반 snapshot만 재계산 중..."):
-            result = pipeline.rebuild_snapshot_only(asof_date=target_asof)
-        st.session_state.asof = result.asof_date
-        st.success(f"스냅샷 재계산 완료: {result.asof_date} | snapshot {result.snapshot:,}건")
-    except ValueError as exc:
-        st.error(f"스냅샷만 재계산 실패: {exc}")
+    _start_background_job("snapshot_refresh", "스냅샷 재계산", repo.get_latest_price_date())
+    _safe_rerun()
 
 if refresh_reserve:
-    with st.spinner("네이버 크롤링으로 유보율 업데이트 중..."):
-        updated_asof, updated_rows = pipeline.update_reserve_ratio_only(asof_date=target_asof)
-        pipeline.rebuild_snapshot_only(asof_date=updated_asof)
-    st.session_state.asof = updated_asof
-    st.success(f"유보율 업데이트 완료: {updated_asof} | reserve_ratio {updated_rows:,}건")
+    _start_background_job("reserve_refresh", "유보율 업데이트 + 스냅샷 재계산", repo.get_latest_price_date())
+    _safe_rerun()
 
 asof = st.session_state.asof
 if not asof:
@@ -219,14 +431,55 @@ with descriptive_tab:
 
     mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), key="mkt")
 
-    apply_mcap_min = st.checkbox("최소 시총(원) 적용", key="apply_mcap_min")
-    mcap_min = st.number_input(
+    mcap_filter_mode = st.selectbox("시가총액 필터", list(MCAP_MODES), key="mcap_filter_mode")
+    mcap_bucket = st.selectbox("시가총액 구간", list(MCAP_BUCKETS.keys()), key="mcap_bucket", disabled=mcap_filter_mode != "구간 선택")
+    mcap_min_custom = st.number_input(
         "최소 시총(원)",
         min_value=0.0,
-
         step=100_000_000.0,
-        disabled=not apply_mcap_min,
-        key="mcap_min",
+        key="mcap_min_custom",
+        disabled=mcap_filter_mode != "직접 입력",
+    )
+    mcap_max_custom = st.number_input(
+        "최대 시총(원)",
+        min_value=0.0,
+        step=100_000_000.0,
+        key="mcap_max_custom",
+        disabled=mcap_filter_mode != "직접 입력",
+    )
+
+    price_filter_mode = st.selectbox("가격 필터", list(PRICE_MODES), key="price_filter_mode")
+    price_bucket = st.selectbox("가격 구간", list(PRICE_BUCKETS.keys()), key="price_bucket", disabled=price_filter_mode != "구간 선택")
+    price_min_custom = st.number_input(
+        "최소 가격(원)",
+        min_value=0.0,
+        step=100.0,
+        key="price_min_custom",
+        disabled=price_filter_mode != "직접 입력",
+    )
+    price_max_custom = st.number_input(
+        "최대 가격(원)",
+        min_value=0.0,
+        step=100.0,
+        key="price_max_custom",
+        disabled=price_filter_mode != "직접 입력",
+    )
+
+    div_filter_mode = st.selectbox("배당수익률 필터", list(DIV_MODES), key="div_filter_mode")
+    div_bucket = st.selectbox("배당수익률 구간", list(DIV_BUCKETS.keys()), key="div_bucket", disabled=div_filter_mode != "구간 선택")
+    div_min_custom = st.number_input(
+        "최소 배당수익률(%)",
+        min_value=0.0,
+        step=0.1,
+        key="div_min_custom",
+        disabled=div_filter_mode != "직접 입력",
+    )
+    div_max_custom = st.number_input(
+        "최대 배당수익률(%)",
+        min_value=0.0,
+        step=0.1,
+        key="div_max_custom",
+        disabled=div_filter_mode != "직접 입력",
     )
 
     apply_value_min = st.checkbox("최소 20D 평균 거래대금(원) 적용", key="apply_value_min")
@@ -291,7 +544,9 @@ active_filter_count = sum(
     [
         int(bool(ticker_list)),
         int(bool(mkt)),
-        int(apply_mcap_min),
+        int(mcap_filter_mode != "Any"),
+        int(price_filter_mode != "Any"),
+        int(div_filter_mode != "Any"),
         int(apply_value_min),
         int(apply_pbr_max),
         int(apply_reserve_ratio_min),
@@ -314,8 +569,46 @@ if ticker_list:
 
 if mkt:
     filtered = filtered[filtered["market"].isin(mkt)]
-if apply_mcap_min:
-    filtered = filtered[filtered["mcap"] >= mcap_min]
+if mcap_filter_mode == "구간 선택":
+    mcap_min, mcap_max = MCAP_BUCKETS.get(mcap_bucket, (None, None))
+    if mcap_min is not None:
+        filtered = filtered[filtered["mcap"] >= mcap_min]
+    if mcap_max is not None:
+        filtered = filtered[filtered["mcap"] < mcap_max]
+elif mcap_filter_mode == "직접 입력":
+    if mcap_min_custom > 0:
+        filtered = filtered[filtered["mcap"] >= mcap_min_custom]
+    if mcap_max_custom > 0:
+        filtered = filtered[filtered["mcap"] <= mcap_max_custom]
+
+if price_filter_mode == "구간 선택":
+    price_min, price_max = PRICE_BUCKETS.get(price_bucket, (None, None))
+    if price_min is not None:
+        filtered = filtered[filtered["close"] >= price_min]
+    if price_max is not None:
+        filtered = filtered[filtered["close"] < price_max]
+elif price_filter_mode == "직접 입력":
+    if price_min_custom > 0:
+        filtered = filtered[filtered["close"] >= price_min_custom]
+    if price_max_custom > 0:
+        filtered = filtered[filtered["close"] <= price_max_custom]
+
+if div_filter_mode == "구간 선택":
+    div_min, div_max = DIV_BUCKETS.get(div_bucket, (None, None))
+    if div_bucket == "무배당(0%)":
+        filtered = filtered[filtered["div"].fillna(0.0) == 0.0]
+    else:
+        filtered = filtered[filtered["div"].notna()]
+        if div_min is not None:
+            filtered = filtered[filtered["div"] >= div_min]
+        if div_max is not None:
+            filtered = filtered[filtered["div"] <= div_max]
+elif div_filter_mode == "직접 입력":
+    filtered = filtered[filtered["div"].notna()]
+    if div_min_custom > 0:
+        filtered = filtered[filtered["div"] >= div_min_custom]
+    if div_max_custom > 0:
+        filtered = filtered[filtered["div"] <= div_max_custom]
 if apply_value_min:
     filtered = filtered[filtered["avg_value_20d"] >= value_min]
 if apply_pbr_max:
