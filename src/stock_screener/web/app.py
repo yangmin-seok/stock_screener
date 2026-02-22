@@ -106,6 +106,11 @@ DIV_BUCKETS: dict[str, tuple[float | None, float | None]] = {
     "5% 이상": (5.0, None),
 }
 
+# Keep explicit mode constants to avoid key drift and to support legacy state migration.
+MCAP_MODES = ("Any", "구간 선택", "직접 입력")
+PRICE_MODES = ("Any", "구간 선택", "직접 입력")
+DIV_MODES = ("Any", "구간 선택", "직접 입력")
+
 
 def _get_query_params() -> dict[str, Any]:
     if hasattr(st, "query_params"):
@@ -341,6 +346,28 @@ if st.session_state.get("query_parse_errors"):
         + ", ".join(st.session_state.query_parse_errors)
     )
 
+# Backward compatibility: migrate legacy session/query keys when older links/state are loaded.
+if "mcap_mode" in st.session_state and "mcap_filter_mode" not in st.session_state:
+    st.session_state.mcap_filter_mode = st.session_state.get("mcap_mode", "Any")
+if "price_mode" in st.session_state and "price_filter_mode" not in st.session_state:
+    st.session_state.price_filter_mode = st.session_state.get("price_mode", "Any")
+if "div_mode" in st.session_state and "div_filter_mode" not in st.session_state:
+    st.session_state.div_filter_mode = st.session_state.get("div_mode", "Any")
+
+if st.session_state.get("mcap_filter_mode") not in MCAP_MODES:
+    st.session_state.mcap_filter_mode = "Any"
+if st.session_state.get("price_filter_mode") not in PRICE_MODES:
+    st.session_state.price_filter_mode = "Any"
+if st.session_state.get("div_filter_mode") not in DIV_MODES:
+    st.session_state.div_filter_mode = "Any"
+
+if st.session_state.get("mcap_bucket") not in MCAP_BUCKETS:
+    st.session_state.mcap_bucket = "전체"
+if st.session_state.get("price_bucket") not in PRICE_BUCKETS:
+    st.session_state.price_bucket = "전체"
+if st.session_state.get("div_bucket") not in DIV_BUCKETS:
+    st.session_state.div_bucket = "전체"
+
 _poll_background_job()
 
 last_job_message = st.session_state.pop("last_job_message", None)
@@ -439,7 +466,7 @@ with descriptive_tab:
 
     mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), key="mkt")
 
-    mcap_filter_mode = st.selectbox("시가총액 필터", ["Any", "구간 선택", "직접 입력"], key="mcap_filter_mode")
+    mcap_filter_mode = st.selectbox("시가총액 필터", list(MCAP_MODES), key="mcap_filter_mode")
     mcap_bucket = st.selectbox("시가총액 구간", list(MCAP_BUCKETS.keys()), key="mcap_bucket", disabled=mcap_filter_mode != "구간 선택")
     mcap_min_custom = st.number_input(
         "최소 시총(원)",
@@ -454,6 +481,40 @@ with descriptive_tab:
         step=100_000_000.0,
         key="mcap_max_custom",
         disabled=mcap_filter_mode != "직접 입력",
+    )
+
+    price_filter_mode = st.selectbox("가격 필터", list(PRICE_MODES), key="price_filter_mode")
+    price_bucket = st.selectbox("가격 구간", list(PRICE_BUCKETS.keys()), key="price_bucket", disabled=price_filter_mode != "구간 선택")
+    price_min_custom = st.number_input(
+        "최소 가격(원)",
+        min_value=0.0,
+        step=100.0,
+        key="price_min_custom",
+        disabled=price_filter_mode != "직접 입력",
+    )
+    price_max_custom = st.number_input(
+        "최대 가격(원)",
+        min_value=0.0,
+        step=100.0,
+        key="price_max_custom",
+        disabled=price_filter_mode != "직접 입력",
+    )
+
+    div_filter_mode = st.selectbox("배당수익률 필터", list(DIV_MODES), key="div_filter_mode")
+    div_bucket = st.selectbox("배당수익률 구간", list(DIV_BUCKETS.keys()), key="div_bucket", disabled=div_filter_mode != "구간 선택")
+    div_min_custom = st.number_input(
+        "최소 배당수익률(%)",
+        min_value=0.0,
+        step=0.1,
+        key="div_min_custom",
+        disabled=div_filter_mode != "직접 입력",
+    )
+    div_max_custom = st.number_input(
+        "최대 배당수익률(%)",
+        min_value=0.0,
+        step=0.1,
+        key="div_max_custom",
+        disabled=div_filter_mode != "직접 입력",
     )
 
     price_filter_mode = st.selectbox("가격 필터", ["Any", "구간 선택", "직접 입력"], key="price_filter_mode")
