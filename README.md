@@ -24,6 +24,11 @@ pip install -e .
 streamlit run src/stock_screener/web/app.py
 ```
 
+### Streamlit 기본 asof 동작
+- 기본 `asof`는 **최신 거래일(가격 데이터 기준)** 을 우선 사용합니다.
+- 최신 거래일에 snapshot이 없으면 최신 snapshot 날짜로 fallback 하며, UI에서 snapshot 재계산이 필요하다는 안내를 표시합니다.
+- 최신 거래일 snapshot이 비어 있는 경우 앱 시작 시 `스냅샷만 재계산`을 자동으로 1회 시도합니다.
+
 ## 배치만 실행
 ```bash
 python -m stock_screener.cli --db-path data/screener.db

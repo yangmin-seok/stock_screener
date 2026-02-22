@@ -21,6 +21,7 @@ pipeline = DailyBatchPipeline(DB_PATH)
 st.set_page_config(layout="wide", page_title="KR Fundamental Screener")
 st.title("🇰🇷 한국 주식 Fundamental Screener (pykrx + SQLite cache)")
 st.caption("최초 실행 시 pykrx 수집으로 시간이 걸리며, 이후에는 DB snapshot을 재사용합니다.")
+st.caption("기본 asof = 최신 거래일(가격 데이터 기준), 해당 거래일 snapshot이 없으면 재계산이 필요합니다.")
 
 
 @dataclass(frozen=True)
@@ -154,7 +155,26 @@ if st.session_state.get("query_parse_errors"):
     )
 
 if "asof" not in st.session_state:
-    st.session_state.asof = repo.get_latest_snapshot_date()
+    latest_price_date = repo.get_latest_price_date()
+    fallback_snapshot_date = repo.get_latest_snapshot_date()
+    st.session_state.asof = latest_price_date or fallback_snapshot_date
+
+    if latest_price_date:
+        latest_price_snapshot = repo.load_snapshot(latest_price_date)
+        if latest_price_snapshot.empty:
+            auto_rebuild_target = st.session_state.get("auto_snapshot_rebuild_attempted_for")
+            if auto_rebuild_target != latest_price_date:
+                st.session_state.auto_snapshot_rebuild_attempted_for = latest_price_date
+                try:
+                    with st.spinner(f"최신 거래일({latest_price_date}) snapshot이 없어 자동 재계산 중..."):
+                        result = pipeline.rebuild_snapshot_only(asof_date=latest_price_date)
+                    st.session_state.asof = result.asof_date
+                    st.success(f"최신 거래일 snapshot 자동 재계산 완료: {result.asof_date} | snapshot {result.snapshot:,}건")
+                except ValueError as exc:
+                    st.warning(
+                        "해당 거래일 스냅샷이 없어 자동 재계산을 시도했지만 실패했습니다. "
+                        f"'스냅샷만 재계산' 버튼으로 다시 시도해 주세요. ({exc})"
+                    )
 
 c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
 with c1:
@@ -200,7 +220,9 @@ if not asof:
 
 base = repo.load_snapshot(asof)
 if base.empty:
-    st.warning("선택한 asof_date snapshot이 비어 있습니다. 다시 수집해 주세요.")
+    st.warning(
+        "해당 거래일 스냅샷이 없습니다. '스냅샷만 재계산' 버튼으로 스냅샷 재계산이 필요합니다."
+    )
     st.stop()
 
 st.subheader(f"Snapshot as of {asof}")
