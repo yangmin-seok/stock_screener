@@ -21,6 +21,7 @@ pipeline = DailyBatchPipeline(DB_PATH)
 st.set_page_config(layout="wide", page_title="KR Fundamental Screener")
 st.title("🇰🇷 한국 주식 Fundamental Screener (pykrx + SQLite cache)")
 st.caption("최초 실행 시 pykrx 수집으로 시간이 걸리며, 이후에는 DB snapshot을 재사용합니다.")
+st.caption("기본 asof = 최신 거래일(가격 데이터 기준), 해당 거래일 snapshot이 없으면 재계산이 필요합니다.")
 
 
 @dataclass(frozen=True)
@@ -238,7 +239,9 @@ if not asof:
 
 base = repo.load_snapshot(asof)
 if base.empty:
-    st.warning("선택한 asof_date snapshot이 비어 있습니다. 다시 수집해 주세요.")
+    st.warning(
+        "해당 거래일 스냅샷이 없습니다. '스냅샷만 재계산' 버튼으로 스냅샷 재계산이 필요합니다."
+    )
     st.stop()
 
 st.subheader(f"Snapshot as of {asof}")
