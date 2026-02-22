@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS snapshot_metrics (
     close REAL,
     mcap REAL,
     avg_value_20d REAL,
+    current_value REAL,
+    relative_value REAL,
     turnover_20d REAL,
     per REAL,
     pbr REAL,
@@ -128,6 +130,8 @@ def init_db(db_path: str | Path) -> None:
         _ensure_column(conn, "snapshot_metrics", "dps", "REAL")
         _ensure_column(conn, "fundamental_daily", "reserve_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "reserve_ratio", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "current_value", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "relative_value", "REAL")
         _ensure_column(conn, "snapshot_metrics", "near_52w_high_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_yoy_q", "REAL")
