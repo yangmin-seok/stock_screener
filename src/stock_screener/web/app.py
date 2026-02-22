@@ -136,6 +136,21 @@ def _serialize_query_filter_value(spec: FilterSpec, value: Any) -> str | list[st
     return None
 
 
+def _run_action_with_progress(action_label: str, callback):
+    progress_text = st.empty()
+    progress_bar = st.progress(0)
+    progress_text.info(f"{action_label}: 요청 접수")
+    progress_bar.progress(15)
+    progress_text.info(f"{action_label}: 작업 실행 중")
+    progress_bar.progress(45)
+    result = callback()
+    progress_text.info(f"{action_label}: 결과 반영 중")
+    progress_bar.progress(85)
+    progress_bar.progress(100)
+    progress_text.success(f"{action_label}: 완료")
+    return result
+
+
 query_params = _get_query_params()
 if "query_params_restored" not in st.session_state:
     st.session_state.query_parse_errors = []
@@ -154,23 +169,36 @@ if st.session_state.get("query_parse_errors"):
     )
 
 if "asof" not in st.session_state:
-    st.session_state.asof = repo.get_latest_snapshot_date()
+    st.session_state.asof = repo.get_latest_price_date() or repo.get_latest_snapshot_date()
 
-c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
+latest_price_date = repo.get_latest_price_date()
+latest_snapshot_date = repo.get_latest_snapshot_date()
+if latest_price_date and latest_price_date != latest_snapshot_date:
+    auto_sync_target = latest_price_date
+    if st.session_state.get("auto_snapshot_synced_for") != auto_sync_target:
+        try:
+            with st.spinner(f"최신 거래일({auto_sync_target}) snapshot 자동 재계산 중..."):
+                auto_result = _run_action_with_progress(
+                    "최신 거래일 snapshot 자동 동기화",
+                    lambda: pipeline.rebuild_snapshot_only(asof_date=auto_sync_target),
+                )
+            st.session_state.asof = auto_result.asof_date
+            st.session_state.auto_snapshot_synced_for = auto_sync_target
+            st.success(f"최신 거래일 snapshot 자동 동기화 완료: {auto_result.asof_date}")
+        except ValueError as exc:
+            st.warning(f"최신 거래일 snapshot 자동 동기화 실패: {exc}")
+
+c1, c2, c3 = st.columns([1, 1, 1])
 with c1:
     refresh_full = st.button("전체 수집 + 스냅샷", type="primary")
 with c2:
     refresh_snapshot = st.button("스냅샷만 재계산", help="이미 수집된 DB 데이터로 snapshot만 다시 계산")
 with c3:
     refresh_reserve = st.button("유보율만 업데이트", help="네이버 크롤링으로 최신 유보율만 업데이트")
-with c4:
-    force_date = st.date_input("asof date (optional)", value=None)
-
-target_asof = force_date.strftime("%Y-%m-%d") if force_date else None
 
 if refresh_full:
     with st.spinner("pykrx 전체 수집 + snapshot 생성 중... (초기 1회 느림)"):
-        result = pipeline.run(asof_date=target_asof)
+        result = _run_action_with_progress("전체 수집 + 스냅샷", lambda: pipeline.run(asof_date=None))
     st.session_state.asof = result.asof_date
     st.success(
         f"전체 수집 완료: {result.asof_date} | 티커 {result.tickers}개 | "
@@ -180,7 +208,10 @@ if refresh_full:
 if refresh_snapshot:
     try:
         with st.spinner("DB 캐시 기반 snapshot만 재계산 중..."):
-            result = pipeline.rebuild_snapshot_only(asof_date=target_asof)
+            result = _run_action_with_progress(
+                "스냅샷 재계산",
+                lambda: pipeline.rebuild_snapshot_only(asof_date=repo.get_latest_price_date()),
+            )
         st.session_state.asof = result.asof_date
         st.success(f"스냅샷 재계산 완료: {result.asof_date} | snapshot {result.snapshot:,}건")
     except ValueError as exc:
@@ -188,8 +219,15 @@ if refresh_snapshot:
 
 if refresh_reserve:
     with st.spinner("네이버 크롤링으로 유보율 업데이트 중..."):
-        updated_asof, updated_rows = pipeline.update_reserve_ratio_only(asof_date=target_asof)
-        pipeline.rebuild_snapshot_only(asof_date=updated_asof)
+        update_result = _run_action_with_progress(
+            "유보율 업데이트",
+            lambda: pipeline.update_reserve_ratio_only(asof_date=repo.get_latest_price_date()),
+        )
+        updated_asof, updated_rows = update_result
+        _run_action_with_progress(
+            "유보율 반영 snapshot 재계산",
+            lambda: pipeline.rebuild_snapshot_only(asof_date=updated_asof),
+        )
     st.session_state.asof = updated_asof
     st.success(f"유보율 업데이트 완료: {updated_asof} | reserve_ratio {updated_rows:,}건")
 
