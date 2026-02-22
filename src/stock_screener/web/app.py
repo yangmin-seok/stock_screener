@@ -37,20 +37,20 @@ class FilterSpec:
 FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("ticker_input", "str", ""),
     FilterSpec("mkt", "list", []),
-    FilterSpec("mcap_mode", "str", "any"),
-    FilterSpec("mcap_bucket", "str", "any"),
-    FilterSpec("mcap_min", "float", 0.0),
-    FilterSpec("mcap_max", "float", 0.0),
-    FilterSpec("price_mode", "str", "any"),
-    FilterSpec("price_bucket", "str", "any"),
-    FilterSpec("price_min", "float", 0.0),
-    FilterSpec("price_max", "float", 0.0),
-    FilterSpec("avg_value_mode", "str", "min"),
-    FilterSpec("avg_value_min", "float", 50_000_000_000.0),
-    FilterSpec("current_value_mode", "str", "any"),
-    FilterSpec("current_value_min", "float", 0.0),
-    FilterSpec("relative_value_mode", "str", "any"),
-    FilterSpec("relative_value_min", "float", 1.0),
+    FilterSpec("mcap_filter_mode", "str", "Any"),
+    FilterSpec("mcap_bucket", "str", "전체"),
+    FilterSpec("mcap_min_custom", "float", 0.0),
+    FilterSpec("mcap_max_custom", "float", 0.0),
+    FilterSpec("price_filter_mode", "str", "Any"),
+    FilterSpec("price_bucket", "str", "전체"),
+    FilterSpec("price_min_custom", "float", 0.0),
+    FilterSpec("price_max_custom", "float", 0.0),
+    FilterSpec("div_filter_mode", "str", "Any"),
+    FilterSpec("div_bucket", "str", "전체"),
+    FilterSpec("div_min_custom", "float", 0.0),
+    FilterSpec("div_max_custom", "float", 0.0),
+    FilterSpec("apply_value_min", "bool", False),
+    FilterSpec("value_min", "float", 0.0),
     FilterSpec("apply_pbr_max", "bool", False),
     FilterSpec("pbr_max", "float", 1.0),
     FilterSpec("apply_roe_min", "bool", False),
@@ -73,78 +73,39 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("limit", "int", 100),
 ]
 
-MCAP_MODES: dict[str, str] = {
-    "any": "Any",
-    "bucket": "구간선택",
-    "custom": "Custom",
+MCAP_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "Nano (<500억)": (None, 50_000_000_000),
+    "Micro (500억~3,000억)": (50_000_000_000, 300_000_000_000),
+    "Small (3,000억~2조)": (300_000_000_000, 2_000_000_000_000),
+    "Mid (2조~10조)": (2_000_000_000_000, 10_000_000_000_000),
+    "Large (10조~50조)": (10_000_000_000_000, 50_000_000_000_000),
+    "Mega (50조 이상)": (50_000_000_000_000, None),
+    "+Large (10조 이상)": (10_000_000_000_000, None),
+    "+Mid (2조 이상)": (2_000_000_000_000, None),
+    "-Small (2조 미만)": (None, 2_000_000_000_000),
 }
 
-MCAP_BUCKETS: list[dict[str, Any]] = [
-    {"key": "any", "label": "전체", "min_mcap": None, "max_mcap": None},
-    {"key": "mega", "label": "초대형주 (10조 이상)", "min_mcap": 10_000_000_000_000.0, "max_mcap": None},
-    {"key": "large", "label": "대형주 (2조~10조)", "min_mcap": 2_000_000_000_000.0, "max_mcap": 10_000_000_000_000.0},
-    {"key": "mid", "label": "중형주 (3천억~2조)", "min_mcap": 300_000_000_000.0, "max_mcap": 2_000_000_000_000.0},
-    {"key": "small", "label": "소형주 (5백억~3천억)", "min_mcap": 50_000_000_000.0, "max_mcap": 300_000_000_000.0},
-    {"key": "micro", "label": "초소형주 (5백억 미만)", "min_mcap": None, "max_mcap": 50_000_000_000.0},
-]
-
-MCAP_BUCKET_MAP = {bucket["key"]: (bucket["min_mcap"], bucket["max_mcap"]) for bucket in MCAP_BUCKETS}
-MCAP_BUCKET_LABEL_MAP = {bucket["key"]: bucket["label"] for bucket in MCAP_BUCKETS}
-
-PRICE_MODES: dict[str, str] = {
-    "any": "Any",
-    "bucket": "구간선택",
-    "custom": "Custom",
+PRICE_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "1,000원 미만": (None, 1_000),
+    "1,000원~5,000원": (1_000, 5_000),
+    "5,000원~10,000원": (5_000, 10_000),
+    "10,000원~50,000원": (10_000, 50_000),
+    "50,000원~100,000원": (50_000, 100_000),
+    "100,000원 이상": (100_000, None),
 }
 
-PRICE_BUCKETS: list[dict[str, Any]] = [
-    {"key": "any", "label": "전체", "min_price": None, "max_price": None},
-    {"key": "under_5000", "label": "5,000원 미만", "min_price": None, "max_price": 5_000.0},
-    {"key": "5000_10000", "label": "5,000원~10,000원", "min_price": 5_000.0, "max_price": 10_000.0},
-    {"key": "10000_30000", "label": "10,000원~30,000원", "min_price": 10_000.0, "max_price": 30_000.0},
-    {"key": "30000_70000", "label": "30,000원~70,000원", "min_price": 30_000.0, "max_price": 70_000.0},
-    {"key": "70000_150000", "label": "70,000원~150,000원", "min_price": 70_000.0, "max_price": 150_000.0},
-    {"key": "over_150000", "label": "150,000원 이상", "min_price": 150_000.0, "max_price": None},
-]
-
-PRICE_BUCKET_MAP = {bucket["key"]: (bucket["min_price"], bucket["max_price"]) for bucket in PRICE_BUCKETS}
-PRICE_BUCKET_LABEL_MAP = {bucket["key"]: bucket["label"] for bucket in PRICE_BUCKETS}
-
-VALUE_FILTER_MODES: dict[str, str] = {
-    "any": "Any",
-    "min": "임계치 이상",
+DIV_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "무배당(0%)": (0.0, 0.0),
+    "배당주(0% 초과)": (0.000001, None),
+    "1% 이상": (1.0, None),
+    "2% 이상": (2.0, None),
+    "3% 이상": (3.0, None),
+    "5% 이상": (5.0, None),
 }
 
-VALUE_THRESHOLD_OPTIONS: list[tuple[str, float]] = [
-    ("0", 0.0),
-    ("10억", 1_000_000_000.0),
-    ("50억", 5_000_000_000.0),
-    ("100억", 10_000_000_000.0),
-    ("500억", 50_000_000_000.0),
-    ("1,000억", 100_000_000_000.0),
-    ("5,000억", 500_000_000_000.0),
-    ("1조", 1_000_000_000_000.0),
-]
-
-RELATIVE_THRESHOLD_OPTIONS: list[tuple[str, float]] = [
-    ("0.5x", 0.5),
-    ("1.0x", 1.0),
-    ("1.5x", 1.5),
-    ("2.0x", 2.0),
-    ("3.0x", 3.0),
-    ("5.0x", 5.0),
-]
-
-DIVIDEND_FILTER_OPTIONS: dict[str, str] = {
-    "any": "전체",
-    "non_dividend": "무배당 (0%)",
-    "dividend": "배당주 (> 0%)",
-    "min_preset": "최소 수익률 구간",
-    "min_custom": "Custom 최소값 입력",
-}
-
-DIVIDEND_MIN_PRESET_OPTIONS: list[float] = [1.0, 2.0, 3.0, 5.0, 7.0]
-DIVIDEND_MISSING_POLICY = "fill_zero"
 
 def _get_query_params() -> dict[str, Any]:
     if hasattr(st, "query_params"):
@@ -478,29 +439,55 @@ with descriptive_tab:
 
     mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), key="mkt")
 
-    mcap_mode = st.radio(
-        "시총 필터 모드",
-        options=list(MCAP_MODES.keys()),
-        format_func=lambda mode: MCAP_MODES[mode],
-        horizontal=True,
-        key="mcap_mode",
-    )
-
-    mcap_bucket = st.selectbox(
-        "시총 구간",
-        options=[bucket["key"] for bucket in MCAP_BUCKETS],
-        format_func=lambda key: MCAP_BUCKET_LABEL_MAP[key],
-        disabled=mcap_mode != "bucket",
-        key="mcap_bucket",
-    )
-
-    custom_mode = mcap_mode == "custom"
-    mcap_min = st.number_input(
+    mcap_filter_mode = st.selectbox("시가총액 필터", ["Any", "구간 선택", "직접 입력"], key="mcap_filter_mode")
+    mcap_bucket = st.selectbox("시가총액 구간", list(MCAP_BUCKETS.keys()), key="mcap_bucket", disabled=mcap_filter_mode != "구간 선택")
+    mcap_min_custom = st.number_input(
         "최소 시총(원)",
         min_value=0.0,
         step=100_000_000.0,
-        disabled=not custom_mode,
-        key="mcap_min",
+        key="mcap_min_custom",
+        disabled=mcap_filter_mode != "직접 입력",
+    )
+    mcap_max_custom = st.number_input(
+        "최대 시총(원)",
+        min_value=0.0,
+        step=100_000_000.0,
+        key="mcap_max_custom",
+        disabled=mcap_filter_mode != "직접 입력",
+    )
+
+    price_filter_mode = st.selectbox("가격 필터", ["Any", "구간 선택", "직접 입력"], key="price_filter_mode")
+    price_bucket = st.selectbox("가격 구간", list(PRICE_BUCKETS.keys()), key="price_bucket", disabled=price_filter_mode != "구간 선택")
+    price_min_custom = st.number_input(
+        "최소 가격(원)",
+        min_value=0.0,
+        step=100.0,
+        key="price_min_custom",
+        disabled=price_filter_mode != "직접 입력",
+    )
+    price_max_custom = st.number_input(
+        "최대 가격(원)",
+        min_value=0.0,
+        step=100.0,
+        key="price_max_custom",
+        disabled=price_filter_mode != "직접 입력",
+    )
+
+    div_filter_mode = st.selectbox("배당수익률 필터", ["Any", "구간 선택", "직접 입력"], key="div_filter_mode")
+    div_bucket = st.selectbox("배당수익률 구간", list(DIV_BUCKETS.keys()), key="div_bucket", disabled=div_filter_mode != "구간 선택")
+    div_min_custom = st.number_input(
+        "최소 배당수익률(%)",
+        min_value=0.0,
+        step=0.1,
+        key="div_min_custom",
+        disabled=div_filter_mode != "직접 입력",
+    )
+    div_max_custom = st.number_input(
+        "최대 배당수익률(%)",
+        min_value=0.0,
+        step=0.1,
+        key="div_max_custom",
+        disabled=div_filter_mode != "직접 입력",
     )
     mcap_max = st.number_input(
         "최대 시총(원)",
@@ -700,12 +687,10 @@ active_filter_count = sum(
     [
         int(bool(ticker_list)),
         int(bool(mkt)),
-        int(mcap_mode != "any"),
-        int(price_mode != "any"),
-        int(avg_value_mode != "any" and avg_value_available),
-        int(current_value_mode != "any" and current_value_available),
-        int(relative_value_mode != "any" and relative_value_available),
-        int(dividend_filter_option != "any" and dividend_available),
+        int(mcap_filter_mode != "Any"),
+        int(price_filter_mode != "Any"),
+        int(div_filter_mode != "Any"),
+        int(apply_value_min),
         int(apply_pbr_max),
         int(apply_reserve_ratio_min),
         int(apply_roe_min),
@@ -727,52 +712,48 @@ if ticker_list:
 
 if mkt:
     filtered = filtered[filtered["market"].isin(mkt)]
-mcap_filter_min: float | None = None
-mcap_filter_max: float | None = None
-if mcap_mode == "bucket":
-    mcap_filter_min, mcap_filter_max = MCAP_BUCKET_MAP[mcap_bucket]
-elif mcap_mode == "custom":
-    mcap_filter_min = mcap_min if mcap_min > 0 else None
-    mcap_filter_max = mcap_max if mcap_max > 0 else None
-    if mcap_filter_min is not None and mcap_filter_max is not None and mcap_filter_min >= mcap_filter_max:
-        st.warning("Custom 시총 범위가 올바르지 않습니다. 최대 시총은 최소 시총보다 커야 합니다.")
+if mcap_filter_mode == "구간 선택":
+    mcap_min, mcap_max = MCAP_BUCKETS.get(mcap_bucket, (None, None))
+    if mcap_min is not None:
+        filtered = filtered[filtered["mcap"] >= mcap_min]
+    if mcap_max is not None:
+        filtered = filtered[filtered["mcap"] < mcap_max]
+elif mcap_filter_mode == "직접 입력":
+    if mcap_min_custom > 0:
+        filtered = filtered[filtered["mcap"] >= mcap_min_custom]
+    if mcap_max_custom > 0:
+        filtered = filtered[filtered["mcap"] <= mcap_max_custom]
 
-if mcap_filter_min is not None:
-    filtered = filtered[filtered["mcap"] >= mcap_filter_min]
-if mcap_filter_max is not None:
-    filtered = filtered[filtered["mcap"] < mcap_filter_max]
+if price_filter_mode == "구간 선택":
+    price_min, price_max = PRICE_BUCKETS.get(price_bucket, (None, None))
+    if price_min is not None:
+        filtered = filtered[filtered["close"] >= price_min]
+    if price_max is not None:
+        filtered = filtered[filtered["close"] < price_max]
+elif price_filter_mode == "직접 입력":
+    if price_min_custom > 0:
+        filtered = filtered[filtered["close"] >= price_min_custom]
+    if price_max_custom > 0:
+        filtered = filtered[filtered["close"] <= price_max_custom]
 
-price_filter_min: float | None = None
-price_filter_max: float | None = None
-if price_mode == "bucket":
-    price_filter_min, price_filter_max = PRICE_BUCKET_MAP[price_bucket]
-elif price_mode == "custom":
-    price_filter_min = price_min if price_min > 0 else None
-    price_filter_max = price_max if price_max > 0 else None
-    if price_filter_min is not None and price_filter_max is not None and price_filter_min >= price_filter_max:
-        st.warning("Custom 가격 범위가 올바르지 않습니다. 최대 가격은 최소 가격보다 커야 합니다.")
-
-if price_filter_min is not None:
-    filtered = filtered[filtered["close"] >= price_filter_min]
-if price_filter_max is not None:
-    filtered = filtered[filtered["close"] < price_filter_max]
-
-if avg_value_mode == "min" and avg_value_available:
-    filtered = filtered[(filtered["avg_value_20d"].notna()) & (filtered["avg_value_20d"] >= avg_value_min)]
-if current_value_mode == "min" and current_value_available:
-    filtered = filtered[(filtered["current_value"].notna()) & (filtered["current_value"] >= current_value_min)]
-if relative_value_mode == "min" and relative_value_available:
-    filtered = filtered[(filtered["relative_value"].notna()) & (filtered["relative_value"] >= relative_value_min)]
-if dividend_filter_option != "any" and dividend_available:
-    dividend_series = filtered["div"].fillna(0.0) if DIVIDEND_MISSING_POLICY == "fill_zero" else filtered["div"]
-    if dividend_filter_option == "non_dividend":
-        filtered = filtered[dividend_series <= 0.0]
-    elif dividend_filter_option == "dividend":
-        filtered = filtered[dividend_series > 0.0]
-    elif dividend_filter_option == "min_preset":
-        filtered = filtered[dividend_series >= dividend_min_preset]
-    elif dividend_filter_option == "min_custom":
-        filtered = filtered[dividend_series >= dividend_min_custom]
+if div_filter_mode == "구간 선택":
+    div_min, div_max = DIV_BUCKETS.get(div_bucket, (None, None))
+    if div_bucket == "무배당(0%)":
+        filtered = filtered[filtered["div"].fillna(0.0) == 0.0]
+    else:
+        filtered = filtered[filtered["div"].notna()]
+        if div_min is not None:
+            filtered = filtered[filtered["div"] >= div_min]
+        if div_max is not None:
+            filtered = filtered[filtered["div"] <= div_max]
+elif div_filter_mode == "직접 입력":
+    filtered = filtered[filtered["div"].notna()]
+    if div_min_custom > 0:
+        filtered = filtered[filtered["div"] >= div_min_custom]
+    if div_max_custom > 0:
+        filtered = filtered[filtered["div"] <= div_max_custom]
+if apply_value_min:
+    filtered = filtered[filtered["avg_value_20d"] >= value_min]
 if apply_pbr_max:
     filtered = filtered[(filtered["pbr"].notna()) & (filtered["pbr"] <= pbr_max)]
 if apply_reserve_ratio_min:
