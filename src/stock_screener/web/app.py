@@ -53,6 +53,9 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("apply_roe_min", "bool", False),
     FilterSpec("roe_min", "float", 0.1),
     FilterSpec("apply_eps_positive", "bool", False),
+    FilterSpec("dividend_filter_option", "str", "any"),
+    FilterSpec("dividend_min_preset", "float", 3.0),
+    FilterSpec("dividend_min_custom", "float", 0.0),
     FilterSpec("apply_reserve_ratio_min", "bool", False),
     FilterSpec("reserve_ratio_min", "float", 500.0),
     FilterSpec("apply_eps_cagr_5y", "bool", False),
@@ -128,6 +131,17 @@ RELATIVE_THRESHOLD_OPTIONS: list[tuple[str, float]] = [
     ("3.0x", 3.0),
     ("5.0x", 5.0),
 ]
+
+DIVIDEND_FILTER_OPTIONS: dict[str, str] = {
+    "any": "전체",
+    "non_dividend": "무배당 (0%)",
+    "dividend": "배당주 (> 0%)",
+    "min_preset": "최소 수익률 구간",
+    "min_custom": "Custom 최소값 입력",
+}
+
+DIVIDEND_MIN_PRESET_OPTIONS: list[float] = [1.0, 2.0, 3.0, 5.0, 7.0]
+DIVIDEND_MISSING_POLICY = "fill_zero"
 
 def _get_query_params() -> dict[str, Any]:
     if hasattr(st, "query_params"):
@@ -250,6 +264,9 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("relative_value_mode") not in VALUE_FILTER_MODES:
         st.session_state.relative_value_mode = "any"
         st.session_state.query_parse_errors.append("relative_value_mode")
+    if st.session_state.get("dividend_filter_option") not in DIVIDEND_FILTER_OPTIONS:
+        st.session_state.dividend_filter_option = "any"
+        st.session_state.query_parse_errors.append("dividend_filter_option")
     if st.session_state.get("price_bucket") not in PRICE_BUCKET_MAP:
         st.session_state.price_bucket = "any"
         st.session_state.query_parse_errors.append("price_bucket")
@@ -345,6 +362,7 @@ st.caption("조건은 Any + 임계치 방식으로 설정되며, 계산 불가�
 avg_value_available = "avg_value_20d" in base.columns and base["avg_value_20d"].notna().any()
 current_value_available = "current_value" in base.columns and base["current_value"].notna().any()
 relative_value_available = "relative_value" in base.columns and base["relative_value"].notna().any()
+dividend_available = "div" in base.columns
 
 descriptive_tab, fundamental_tab, technical_tab = st.tabs(["Descriptive", "Fundamental", "Technical"])
 
@@ -492,6 +510,41 @@ with descriptive_tab:
         st.info("상대 거래대금 계산이 불가하여 필터를 비활성화했습니다.")
 
 with fundamental_tab:
+    dividend_filter_option = st.selectbox(
+        "Dividend Yield (%)",
+        options=list(DIVIDEND_FILTER_OPTIONS.keys()),
+        format_func=lambda option: DIVIDEND_FILTER_OPTIONS[option],
+        key="dividend_filter_option",
+        disabled=not dividend_available,
+    )
+
+    dividend_min_preset = st.selectbox(
+        "최소 Dividend Yield 구간 (%)",
+        options=DIVIDEND_MIN_PRESET_OPTIONS,
+        format_func=lambda value: f"{value:.1f}% 이상",
+        index=DIVIDEND_MIN_PRESET_OPTIONS.index(st.session_state.dividend_min_preset)
+        if st.session_state.dividend_min_preset in DIVIDEND_MIN_PRESET_OPTIONS
+        else 2,
+        disabled=(not dividend_available) or dividend_filter_option != "min_preset",
+        key="dividend_min_preset",
+    )
+
+    dividend_min_custom = st.number_input(
+        "Custom 최소 Dividend Yield (%)",
+        min_value=0.0,
+        step=0.1,
+        format="%.1f",
+        disabled=(not dividend_available) or dividend_filter_option != "min_custom",
+        key="dividend_min_custom",
+    )
+
+    if DIVIDEND_MISSING_POLICY == "fill_zero":
+        st.caption("배당 결측 데이터는 필터 계산 시 **0% (무배당)** 으로 고정 처리합니다.")
+
+    if not dividend_available:
+        st.session_state.dividend_filter_option = "any"
+        st.info("배당수익률(%) 데이터가 없어 관련 필터를 비활성화했습니다.")
+
     apply_pbr_max = st.checkbox("최대 PBR 적용", key="apply_pbr_max")
     pbr_max = st.number_input("최대 PBR", min_value=0.0, step=0.1, disabled=not apply_pbr_max, key="pbr_max")
 
@@ -548,6 +601,7 @@ active_filter_count = sum(
         int(avg_value_mode != "any" and avg_value_available),
         int(current_value_mode != "any" and current_value_available),
         int(relative_value_mode != "any" and relative_value_available),
+        int(dividend_filter_option != "any" and dividend_available),
         int(apply_pbr_max),
         int(apply_reserve_ratio_min),
         int(apply_roe_min),
@@ -605,6 +659,16 @@ if current_value_mode == "min" and current_value_available:
     filtered = filtered[(filtered["current_value"].notna()) & (filtered["current_value"] >= current_value_min)]
 if relative_value_mode == "min" and relative_value_available:
     filtered = filtered[(filtered["relative_value"].notna()) & (filtered["relative_value"] >= relative_value_min)]
+if dividend_filter_option != "any" and dividend_available:
+    dividend_series = filtered["div"].fillna(0.0) if DIVIDEND_MISSING_POLICY == "fill_zero" else filtered["div"]
+    if dividend_filter_option == "non_dividend":
+        filtered = filtered[dividend_series <= 0.0]
+    elif dividend_filter_option == "dividend":
+        filtered = filtered[dividend_series > 0.0]
+    elif dividend_filter_option == "min_preset":
+        filtered = filtered[dividend_series >= dividend_min_preset]
+    elif dividend_filter_option == "min_custom":
+        filtered = filtered[dividend_series >= dividend_min_custom]
 if apply_pbr_max:
     filtered = filtered[(filtered["pbr"].notna()) & (filtered["pbr"] <= pbr_max)]
 if apply_reserve_ratio_min:
