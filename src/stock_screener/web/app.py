@@ -53,6 +53,11 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("relvol_bucket", "str", "전체"),
     FilterSpec("relvol_min_custom", "float", 0.0),
     FilterSpec("relvol_max_custom", "float", 0.0),
+    FilterSpec("momentum_metric", "str", "ret_3m"),
+    FilterSpec("momentum_filter_mode", "str", "Any"),
+    FilterSpec("momentum_bucket", "str", "전체"),
+    FilterSpec("momentum_min_custom", "float", 0.0),
+    FilterSpec("momentum_max_custom", "float", 0.0),
     FilterSpec("apply_value_min", "bool", False),
     FilterSpec("value_min", "float", 0.0),
     FilterSpec("apply_pbr_max", "bool", False),
@@ -120,6 +125,22 @@ MCAP_MODES = ("Any", "구간 선택", "직접 입력")
 PRICE_MODES = ("Any", "구간 선택", "직접 입력")
 DIV_MODES = ("Any", "구간 선택", "직접 입력")
 RELVOL_MODES = ("Any", "구간 선택", "직접 입력")
+MOMENTUM_MODES = ("Any", "구간 선택", "직접 입력")
+MOMENTUM_METRICS: dict[str, str] = {
+    "ret_3m": "3개월 수익률(ret_3m)",
+    "ret_6m": "6개월 수익률(ret_6m)",
+    "ret_1y": "1년 수익률(ret_1y)",
+    "near_52w_high_ratio": "52주 신고가 근접도(near_52w_high_ratio)",
+}
+MOMENTUM_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "-20% 이하": (None, -0.2),
+    "-10% 이하": (None, -0.1),
+    "0% 이상": (0.0, None),
+    "+10% 이상": (0.1, None),
+    "+20% 이상": (0.2, None),
+    "+50% 이상": (0.5, None),
+}
 
 
 def _get_query_params() -> dict[str, Any]:
@@ -324,6 +345,8 @@ if "query_params_restored" not in st.session_state:
         "mcap_mode": "mcap_filter_mode",
         "price_mode": "price_filter_mode",
         "div_mode": "div_filter_mode",
+        "momentum_mode": "momentum_filter_mode",
+        "momentum_col": "momentum_metric",
     }
     for legacy_key, new_key in legacy_query_key_map.items():
         if new_key not in query_params and legacy_key in query_params:
@@ -348,6 +371,9 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("relvol_filter_mode") not in RELVOL_MODES:
         st.session_state.relvol_filter_mode = "Any"
         st.session_state.query_parse_errors.append("relvol_filter_mode")
+    if st.session_state.get("momentum_filter_mode") not in MOMENTUM_MODES:
+        st.session_state.momentum_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("momentum_filter_mode")
 
     if st.session_state.get("mcap_bucket") not in MCAP_BUCKETS:
         st.session_state.mcap_bucket = "전체"
@@ -361,6 +387,12 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("relvol_bucket") not in RELVOL_BUCKETS:
         st.session_state.relvol_bucket = "전체"
         st.session_state.query_parse_errors.append("relvol_bucket")
+    if st.session_state.get("momentum_bucket") not in MOMENTUM_BUCKETS:
+        st.session_state.momentum_bucket = "전체"
+        st.session_state.query_parse_errors.append("momentum_bucket")
+    if st.session_state.get("momentum_metric") not in MOMENTUM_METRICS:
+        st.session_state.momentum_metric = "ret_3m"
+        st.session_state.query_parse_errors.append("momentum_metric")
 
     st.session_state.query_params_restored = True
 
@@ -378,6 +410,8 @@ if st.session_state.get("div_filter_mode") not in DIV_MODES:
     st.session_state.div_filter_mode = "Any"
 if st.session_state.get("relvol_filter_mode") not in RELVOL_MODES:
     st.session_state.relvol_filter_mode = "Any"
+if st.session_state.get("momentum_filter_mode") not in MOMENTUM_MODES:
+    st.session_state.momentum_filter_mode = "Any"
 
 if st.session_state.get("mcap_bucket") not in MCAP_BUCKETS:
     st.session_state.mcap_bucket = "전체"
@@ -387,6 +421,10 @@ if st.session_state.get("div_bucket") not in DIV_BUCKETS:
     st.session_state.div_bucket = "전체"
 if st.session_state.get("relvol_bucket") not in RELVOL_BUCKETS:
     st.session_state.relvol_bucket = "전체"
+if st.session_state.get("momentum_bucket") not in MOMENTUM_BUCKETS:
+    st.session_state.momentum_bucket = "전체"
+if st.session_state.get("momentum_metric") not in MOMENTUM_METRICS:
+    st.session_state.momentum_metric = "ret_3m"
 
 _poll_background_job()
 
@@ -473,6 +511,8 @@ st.caption("조건은 Any + 임계치 방식으로 설정되며, 계산 불가�
 
 avg_value_available = "avg_value_20d" in base.columns and base["avg_value_20d"].notna().any()
 relative_value_available = "relative_value" in base.columns and base["relative_value"].notna().any()
+available_momentum_metrics = [metric for metric in MOMENTUM_METRICS if metric in base.columns and base[metric].notna().any()]
+momentum_available = bool(available_momentum_metrics)
 
 descriptive_tab, fundamental_tab, technical_tab = st.tabs(["Descriptive", "Fundamental", "Technical"])
 
@@ -565,6 +605,46 @@ with descriptive_tab:
         st.session_state.relvol_filter_mode = "Any"
         st.info("relative_value 데이터가 없어 해당 필터를 비활성화했습니다.")
 
+    momentum_metric = st.selectbox(
+        "모멘텀 기준",
+        list(MOMENTUM_METRICS.keys()),
+        key="momentum_metric",
+        format_func=lambda key: MOMENTUM_METRICS.get(key, key),
+        disabled=not momentum_available,
+    )
+    momentum_filter_mode = st.selectbox(
+        "모멘텀 필터",
+        list(MOMENTUM_MODES),
+        key="momentum_filter_mode",
+        disabled=not momentum_available,
+    )
+    momentum_bucket = st.selectbox(
+        "모멘텀 구간",
+        list(MOMENTUM_BUCKETS.keys()),
+        key="momentum_bucket",
+        disabled=(not momentum_available) or (momentum_filter_mode != "구간 선택"),
+    )
+    momentum_min_custom = st.number_input(
+        "최소 모멘텀",
+        step=0.01,
+        format="%.2f",
+        key="momentum_min_custom",
+        disabled=(not momentum_available) or (momentum_filter_mode != "직접 입력"),
+    )
+    momentum_max_custom = st.number_input(
+        "최대 모멘텀",
+        step=0.01,
+        format="%.2f",
+        key="momentum_max_custom",
+        disabled=(not momentum_available) or (momentum_filter_mode != "직접 입력"),
+    )
+    if momentum_metric not in available_momentum_metrics and available_momentum_metrics:
+        st.session_state.momentum_metric = available_momentum_metrics[0]
+        momentum_metric = st.session_state.momentum_metric
+    if not momentum_available:
+        st.session_state.momentum_filter_mode = "Any"
+        st.info("모멘텀 데이터가 없어 해당 필터를 비활성화했습니다.")
+
     apply_value_min = st.checkbox("최소 평균 거래대금(20D) 적용", key="apply_value_min", disabled=not avg_value_available)
     value_min = st.number_input(
         "최소 평균 거래대금(원)",
@@ -633,6 +713,7 @@ active_filter_count = sum(
         int(price_filter_mode != "Any"),
         int(div_filter_mode != "Any"),
         int(relvol_filter_mode != "Any"),
+        int(momentum_available and momentum_filter_mode != "Any"),
         int(apply_value_min),
         int(apply_pbr_max),
         int(apply_reserve_ratio_min),
@@ -710,6 +791,20 @@ elif relvol_filter_mode == "직접 입력":
     if relvol_max_custom > 0:
         filtered = filtered[filtered["relative_value"] <= relvol_max_custom]
 
+if momentum_available and momentum_filter_mode == "구간 선택":
+    momentum_min, momentum_max = MOMENTUM_BUCKETS.get(momentum_bucket, (None, None))
+    filtered = filtered[filtered[momentum_metric].notna()]
+    if momentum_min is not None:
+        filtered = filtered[filtered[momentum_metric] >= momentum_min]
+    if momentum_max is not None:
+        filtered = filtered[filtered[momentum_metric] <= momentum_max]
+elif momentum_available and momentum_filter_mode == "직접 입력":
+    filtered = filtered[filtered[momentum_metric].notna()]
+    if momentum_min_custom != 0:
+        filtered = filtered[filtered[momentum_metric] >= momentum_min_custom]
+    if momentum_max_custom != 0:
+        filtered = filtered[filtered[momentum_metric] <= momentum_max_custom]
+
 if apply_value_min:
     filtered = filtered[filtered["avg_value_20d"] >= value_min]
 if apply_pbr_max:
@@ -731,7 +826,10 @@ if apply_near_high:
 
 sort_col = st.selectbox(
     "정렬 컬럼",
-    ["mcap", "pbr", "reserve_ratio", "roe_proxy", "ret_3m", "div", "avg_value_20d", "current_value", "relative_value", "eps_cagr_5y", "eps_yoy_q", "near_52w_high_ratio"],
+    [
+        "mcap", "pbr", "reserve_ratio", "roe_proxy", "ret_3m", "ret_6m", "ret_1y", "near_52w_high_ratio", "div",
+        "avg_value_20d", "current_value", "relative_value", "eps_cagr_5y", "eps_yoy_q",
+    ],
     key="sort_col",
 )
 ascending = st.checkbox("오름차순", key="ascending")
@@ -767,6 +865,14 @@ if relvol_filter_mode != "직접 입력":
 if relvol_filter_mode != "구간 선택":
     query_filter_state.pop("relvol_bucket", None)
 
+if momentum_filter_mode != "직접 입력":
+    query_filter_state.pop("momentum_min_custom", None)
+    query_filter_state.pop("momentum_max_custom", None)
+if momentum_filter_mode != "구간 선택":
+    query_filter_state.pop("momentum_bucket", None)
+if momentum_filter_mode == "Any":
+    query_filter_state.pop("momentum_metric", None)
+
 _set_query_params(query_filter_state)
 
 share_query_string = urlencode(query_filter_state, doseq=True)
@@ -787,7 +893,7 @@ if filtered.empty:
 
 show_cols = [
     "ticker", "name", "market", "close", "mcap", "avg_value_20d", "current_value", "relative_value", "pbr", "reserve_ratio", "per", "div", "dps",
-    "eps", "bps", "roe_proxy", "eps_positive", "ret_3m", "ret_1y", "dist_sma200", "pos_52w",
+    "eps", "bps", "roe_proxy", "eps_positive", "ret_3m", "ret_6m", "ret_1y", "dist_sma200", "pos_52w",
     "near_52w_high_ratio", "eps_cagr_5y", "eps_yoy_q",
 ]
 st.dataframe(filtered[show_cols], width="stretch", hide_index=True)
