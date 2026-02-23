@@ -336,6 +336,62 @@ def _render_active_job_panel() -> None:
             _safe_rerun()
 
 
+def render_range_filter(
+    *,
+    label: str,
+    mode_key: str,
+    bucket_key: str,
+    min_key: str,
+    max_key: str,
+    modes: tuple[str, ...],
+    buckets: dict[str, tuple[float | None, float | None]],
+    bucket_label: str,
+    min_label: str,
+    max_label: str,
+    min_value: float | None = 0.0,
+    step: float = 1.0,
+    disabled: bool = False,
+    number_format: str | None = None,
+) -> tuple[str, str, float, float]:
+    mode = st.selectbox(label, list(modes), key=mode_key, disabled=disabled)
+
+    bucket = st.session_state.get(bucket_key, "전체")
+    min_custom = float(st.session_state.get(min_key, 0.0))
+    max_custom = float(st.session_state.get(max_key, 0.0))
+
+    if mode == "구간 선택":
+        bucket = st.selectbox(
+            bucket_label,
+            list(buckets.keys()),
+            key=bucket_key,
+            disabled=disabled,
+        )
+    elif mode == "직접 입력":
+        number_kwargs: dict[str, Any] = {
+            "step": step,
+            "key": min_key,
+            "disabled": disabled,
+        }
+        if min_value is not None:
+            number_kwargs["min_value"] = min_value
+        if number_format is not None:
+            number_kwargs["format"] = number_format
+        min_custom = st.number_input(min_label, **number_kwargs)
+
+        number_kwargs = {
+            "step": step,
+            "key": max_key,
+            "disabled": disabled,
+        }
+        if min_value is not None:
+            number_kwargs["min_value"] = min_value
+        if number_format is not None:
+            number_kwargs["format"] = number_format
+        max_custom = st.number_input(max_label, **number_kwargs)
+
+    return mode, bucket, float(min_custom), float(max_custom)
+
+
 query_params = _get_query_params()
 if "query_params_restored" not in st.session_state:
     st.session_state.query_parse_errors = []
@@ -524,85 +580,69 @@ with descriptive_tab:
 
     mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), key="mkt")
 
-    mcap_filter_mode = st.selectbox("시가총액 필터", list(MCAP_MODES), key="mcap_filter_mode")
-    mcap_bucket = st.selectbox("시가총액 구간", list(MCAP_BUCKETS.keys()), key="mcap_bucket", disabled=mcap_filter_mode != "구간 선택")
-    mcap_min_custom = st.number_input(
-        "최소 시총(원)",
+    mcap_filter_mode, mcap_bucket, mcap_min_custom, mcap_max_custom = render_range_filter(
+        label="시가총액 필터",
+        mode_key="mcap_filter_mode",
+        bucket_key="mcap_bucket",
+        min_key="mcap_min_custom",
+        max_key="mcap_max_custom",
+        modes=MCAP_MODES,
+        buckets=MCAP_BUCKETS,
+        bucket_label="시가총액 구간",
+        min_label="최소 시총(원)",
+        max_label="최대 시총(원)",
         min_value=0.0,
         step=100_000_000.0,
-        key="mcap_min_custom",
-        disabled=mcap_filter_mode != "직접 입력",
-    )
-    mcap_max_custom = st.number_input(
-        "최대 시총(원)",
-        min_value=0.0,
-        step=100_000_000.0,
-        key="mcap_max_custom",
-        disabled=mcap_filter_mode != "직접 입력",
     )
 
-    price_filter_mode = st.selectbox("가격 필터", list(PRICE_MODES), key="price_filter_mode")
-    price_bucket = st.selectbox("가격 구간", list(PRICE_BUCKETS.keys()), key="price_bucket", disabled=price_filter_mode != "구간 선택")
-    price_min_custom = st.number_input(
-        "최소 가격(원)",
+    price_filter_mode, price_bucket, price_min_custom, price_max_custom = render_range_filter(
+        label="가격 필터",
+        mode_key="price_filter_mode",
+        bucket_key="price_bucket",
+        min_key="price_min_custom",
+        max_key="price_max_custom",
+        modes=PRICE_MODES,
+        buckets=PRICE_BUCKETS,
+        bucket_label="가격 구간",
+        min_label="최소 가격(원)",
+        max_label="최대 가격(원)",
         min_value=0.0,
         step=100.0,
-        key="price_min_custom",
-        disabled=price_filter_mode != "직접 입력",
-    )
-    price_max_custom = st.number_input(
-        "최대 가격(원)",
-        min_value=0.0,
-        step=100.0,
-        key="price_max_custom",
-        disabled=price_filter_mode != "직접 입력",
     )
 
-    div_filter_mode = st.selectbox("배당수익률 필터", list(DIV_MODES), key="div_filter_mode")
-    div_bucket = st.selectbox("배당수익률 구간", list(DIV_BUCKETS.keys()), key="div_bucket", disabled=div_filter_mode != "구간 선택")
-    div_min_custom = st.number_input(
-        "최소 배당수익률(%)",
+    div_filter_mode, div_bucket, div_min_custom, div_max_custom = render_range_filter(
+        label="배당수익률 필터",
+        mode_key="div_filter_mode",
+        bucket_key="div_bucket",
+        min_key="div_min_custom",
+        max_key="div_max_custom",
+        modes=DIV_MODES,
+        buckets=DIV_BUCKETS,
+        bucket_label="배당수익률 구간",
+        min_label="최소 배당수익률(%)",
+        max_label="최대 배당수익률(%)",
         min_value=0.0,
         step=0.1,
-        key="div_min_custom",
-        disabled=div_filter_mode != "직접 입력",
-    )
-    div_max_custom = st.number_input(
-        "최대 배당수익률(%)",
-        min_value=0.0,
-        step=0.1,
-        key="div_max_custom",
-        disabled=div_filter_mode != "직접 입력",
     )
 
-    relvol_filter_mode = st.selectbox(
-        "상대 거래대금(relative_value) 필터",
-        list(RELVOL_MODES),
-        key="relvol_filter_mode",
+    relvol_filter_mode, relvol_bucket, relvol_min_custom, relvol_max_custom = render_range_filter(
+        label="상대 거래대금(relative_value) 필터",
+        mode_key="relvol_filter_mode",
+        bucket_key="relvol_bucket",
+        min_key="relvol_min_custom",
+        max_key="relvol_max_custom",
+        modes=RELVOL_MODES,
+        buckets=RELVOL_BUCKETS,
+        bucket_label="상대 거래대금 구간",
+        min_label="최소 상대 거래대금(x)",
+        max_label="최대 상대 거래대금(x)",
+        min_value=0.0,
+        step=0.1,
         disabled=not relative_value_available,
-    )
-    relvol_bucket = st.selectbox(
-        "상대 거래대금 구간",
-        list(RELVOL_BUCKETS.keys()),
-        key="relvol_bucket",
-        disabled=(not relative_value_available) or (relvol_filter_mode != "구간 선택"),
-    )
-    relvol_min_custom = st.number_input(
-        "최소 상대 거래대금(x)",
-        min_value=0.0,
-        step=0.1,
-        key="relvol_min_custom",
-        disabled=(not relative_value_available) or (relvol_filter_mode != "직접 입력"),
-    )
-    relvol_max_custom = st.number_input(
-        "최대 상대 거래대금(x)",
-        min_value=0.0,
-        step=0.1,
-        key="relvol_max_custom",
-        disabled=(not relative_value_available) or (relvol_filter_mode != "직접 입력"),
     )
     if not relative_value_available:
         st.session_state.relvol_filter_mode = "Any"
+        relvol_filter_mode = "Any"
         st.info("relative_value 데이터가 없어 해당 필터를 비활성화했습니다.")
 
     momentum_metric = st.selectbox(
