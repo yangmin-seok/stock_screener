@@ -60,6 +60,12 @@ python -m stock_screener.cli --db-path data/screener.db --update-reserve-only --
 - 다만 `src/stock_screener/screener/dsl.py`는 재사용 가능한 DataFrame 필터 유틸리티이며, 단위 테스트(`tests/test_dsl.py`)에서 동작을 검증하므로 유지합니다.
 
 
+
+## Descriptive 탭 UI 원칙
+- Descriptive 필터 행은 동일한 컬럼 그리드(기준선) 정렬을 유지합니다.
+- 새 필터를 추가할 때는 기존 행과 수직 기준선이 어긋나지 않도록 동일 폭 컬럼 또는 동일 그리드의 다중 행 구성 방식을 우선합니다.
+- `Any / 구간 선택 / 직접 입력` 모드 전환은 기존 상태/쿼리 파라미터 동기화 규칙을 그대로 따릅니다.
+
 ## 실행 시간 가이드
 - **전체 수집 + 스냅샷**: 최초 1회는 티커×기간 API 호출 때문에 수 분~수십 분이 걸릴 수 있습니다.
 - 가격/시총 수집 기간은 `asof_date - (lookback_days * 2)`부터 `asof_date`까지의 거래일입니다. 예: `lookback_days=400`, `asof=2026-02-13`이면 대략 2023년 말부터 조회됩니다.

@@ -10,12 +10,14 @@
 - Default `asof` follows latest trading day data with snapshot fallback.
 - Long-running jobs must remain cancellable from UI.
 - Descriptive tab should support range-based selectors (market cap, price, dividend yield) with `Any / 구간 선택 / 직접 입력`.
+- In Descriptive tab, keep control rows visually aligned to the same column grid; avoid mixing incompatible column splits that break vertical line-up.
 
 ## Coding guidelines
 - Keep filter state and URL query sync in lockstep.
   - When adding/changing filters, update `FILTER_SPECS`, parse/serialize flow, and application logic together.
 - Preserve backward compatibility for query/session keys when renaming filter fields.
 - Avoid UI clutter: prefer one clear control path per filter and remove duplicate/overlapping controls.
+- If a new UI row needs extra fields, prefer multi-row composition on the same base grid instead of introducing a conflicting grid width.
 - Do not wrap imports in try/catch.
 
 ## Validation checklist (before commit)
