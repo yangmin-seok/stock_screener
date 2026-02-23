@@ -362,6 +362,19 @@ def _format_range_summary(mode: str, bucket: str, min_custom: float, max_custom:
     return "Any"
 
 
+def _format_volume_caption(label: str, mode: str, bucket: str, min_custom: float, max_custom: float, unit: str = "") -> str:
+    if mode == "구간 선택":
+        return f"{label} {bucket}"
+    if mode == "직접 입력":
+        if min_custom and max_custom:
+            return f"{label} {min_custom:g}{unit} ~ {max_custom:g}{unit}"
+        if min_custom:
+            return f"{label} {min_custom:g}{unit} 이상"
+        if max_custom:
+            return f"{label} {max_custom:g}{unit} 이하"
+    return f"{label} Any"
+
+
 query_params = _get_query_params()
 if "query_params_restored" not in st.session_state:
     st.session_state.query_parse_errors = []
@@ -689,8 +702,11 @@ with descriptive_tab:
             help="단위: %",
         )
 
-    st.markdown("#### 유동성")
-    value_cols = st.columns([1, 1, 1, 1, 1])
+    st.markdown("#### 평균 거래대금")
+    value_bucket = st.session_state.get("value_bucket", "전체")
+    value_min_custom = st.session_state.get("value_min_custom", 0.0)
+    value_max_custom = st.session_state.get("value_max_custom", 0.0)
+    value_cols = st.columns(4)
     with value_cols[0]:
         value_filter_mode = st.selectbox(
             "평균 거래대금(20D)",
@@ -700,37 +716,45 @@ with descriptive_tab:
             help="avg_value_20d = 최근 20거래일 일평균 거래대금",
         )
     with value_cols[1]:
-        value_bucket = st.selectbox(
-            "평균 거래대금 구간",
-            list(VALUE_BUCKETS.keys()),
-            key="value_bucket",
-            disabled=(not avg_value_available) or (value_filter_mode != "구간 선택"),
-        )
+        if avg_value_available and value_filter_mode == "구간 선택":
+            value_bucket = st.selectbox("구간", list(VALUE_BUCKETS.keys()), key="value_bucket")
+        else:
+            st.empty()
     with value_cols[2]:
-        value_min_custom = st.number_input(
-            "최소",
-            min_value=0.0,
-            step=100_000_000.0,
-            key="value_min_custom",
-            disabled=(not avg_value_available) or (value_filter_mode != "직접 입력"),
-            help="단위: 원",
-        )
+        if avg_value_available and value_filter_mode == "직접 입력":
+            value_min_custom = st.number_input(
+                "최소",
+                min_value=0.0,
+                step=100_000_000.0,
+                key="value_min_custom",
+                help="단위: 원",
+            )
+        else:
+            st.empty()
     with value_cols[3]:
-        value_max_custom = st.number_input(
-            "최대",
-            min_value=0.0,
-            step=100_000_000.0,
-            key="value_max_custom",
-            disabled=(not avg_value_available) or (value_filter_mode != "직접 입력"),
-            help="단위: 원",
-        )
+        if avg_value_available and value_filter_mode == "직접 입력":
+            value_max_custom = st.number_input(
+                "최대",
+                min_value=0.0,
+                step=100_000_000.0,
+                key="value_max_custom",
+                help="단위: 원",
+            )
+        else:
+            st.empty()
     if not avg_value_available:
         st.session_state.value_filter_mode = "Any"
         value_filter_mode = "Any"
         st.info("평균 거래대금 데이터가 없어 해당 필터를 비활성화했습니다.")
+    st.caption(
+        _format_volume_caption("평균 거래대금", value_filter_mode, value_bucket, value_min_custom, value_max_custom, "원")
+    )
 
     st.markdown("#### 상대거래량")
-    rel_cols = st.columns([1, 1, 1, 1, 1])
+    relvol_bucket = st.session_state.get("relvol_bucket", "전체")
+    relvol_min_custom = st.session_state.get("relvol_min_custom", 0.0)
+    relvol_max_custom = st.session_state.get("relvol_max_custom", 0.0)
+    rel_cols = st.columns(4)
     with rel_cols[0]:
         relvol_filter_mode = st.selectbox(
             "상대거래량 (현재/20D)",
@@ -740,34 +764,39 @@ with descriptive_tab:
             help="상대거래량 = current_value / avg_value_20d",
         )
     with rel_cols[1]:
-        relvol_bucket = st.selectbox(
-            "상대거래량 구간",
-            list(RELVOL_BUCKETS.keys()),
-            key="relvol_bucket",
-            disabled=(not relative_value_available) or (relvol_filter_mode != "구간 선택"),
-        )
+        if relative_value_available and relvol_filter_mode == "구간 선택":
+            relvol_bucket = st.selectbox("구간", list(RELVOL_BUCKETS.keys()), key="relvol_bucket")
+        else:
+            st.empty()
     with rel_cols[2]:
-        relvol_min_custom = st.number_input(
-            "최소",
-            min_value=0.0,
-            step=0.1,
-            key="relvol_min_custom",
-            disabled=(not relative_value_available) or (relvol_filter_mode != "직접 입력"),
-            help="단위: x",
-        )
+        if relative_value_available and relvol_filter_mode == "직접 입력":
+            relvol_min_custom = st.number_input(
+                "최소",
+                min_value=0.0,
+                step=0.1,
+                key="relvol_min_custom",
+                help="단위: x",
+            )
+        else:
+            st.empty()
     with rel_cols[3]:
-        relvol_max_custom = st.number_input(
-            "최대",
-            min_value=0.0,
-            step=0.1,
-            key="relvol_max_custom",
-            disabled=(not relative_value_available) or (relvol_filter_mode != "직접 입력"),
-            help="단위: x",
-        )
+        if relative_value_available and relvol_filter_mode == "직접 입력":
+            relvol_max_custom = st.number_input(
+                "최대",
+                min_value=0.0,
+                step=0.1,
+                key="relvol_max_custom",
+                help="단위: x",
+            )
+        else:
+            st.empty()
     if not relative_value_available:
         st.session_state.relvol_filter_mode = "Any"
         relvol_filter_mode = "Any"
         st.info("relative_value 데이터가 없어 해당 필터를 비활성화했습니다.")
+    st.caption(
+        _format_volume_caption("상대거래량", relvol_filter_mode, relvol_bucket, relvol_min_custom, relvol_max_custom, "x")
+    )
 
     momentum_cols = st.columns([1, 1, 1, 1, 1])
     with momentum_cols[0]:
