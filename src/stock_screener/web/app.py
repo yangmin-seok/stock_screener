@@ -451,6 +451,63 @@ def _render_descriptive_range_filter(
     return mode, bucket, min_custom, max_custom
 
 
+def _render_descriptive_caption(caption_text: str) -> None:
+    caption_cols = st.columns(4)
+    with caption_cols[0]:
+        st.caption(caption_text)
+
+
+def _render_momentum_filter(*, row_disabled: bool = False) -> tuple[str, str, str, float, float]:
+    st.markdown("#### 강도")
+    row1_cols = st.columns(4)
+    with row1_cols[0]:
+        momentum_metric = st.selectbox(
+            "강도기준",
+            list(MOMENTUM_METRICS.keys()),
+            key="momentum_metric",
+            format_func=lambda key: MOMENTUM_METRICS.get(key, key),
+            disabled=row_disabled,
+        )
+    with row1_cols[1]:
+        momentum_filter_mode = st.selectbox(
+            "강도필터",
+            list(MOMENTUM_MODES),
+            key="momentum_filter_mode",
+            disabled=row_disabled,
+        )
+    with row1_cols[2]:
+        momentum_bucket = st.selectbox(
+            "강도구간",
+            list(MOMENTUM_BUCKETS.keys()),
+            key="momentum_bucket",
+            disabled=row_disabled or (momentum_filter_mode != "구간 선택"),
+        )
+    with row1_cols[3]:
+        st.caption("수익률/비율 값을 사용합니다.")
+
+    row2_cols = st.columns(4)
+    with row2_cols[0]:
+        momentum_min_custom = st.number_input(
+            "최소",
+            step=0.01,
+            format="%.2f",
+            key="momentum_min_custom",
+            disabled=row_disabled or (momentum_filter_mode != "직접 입력"),
+            help="수익률/비율 값",
+        )
+    with row2_cols[1]:
+        momentum_max_custom = st.number_input(
+            "최대",
+            step=0.01,
+            format="%.2f",
+            key="momentum_max_custom",
+            disabled=row_disabled or (momentum_filter_mode != "직접 입력"),
+            help="수익률/비율 값",
+        )
+
+    return momentum_metric, momentum_filter_mode, momentum_bucket, momentum_min_custom, momentum_max_custom
+
+
 query_params = _get_query_params()
 if "query_params_restored" not in st.session_state:
     st.session_state.query_parse_errors = []
@@ -741,7 +798,7 @@ with descriptive_tab:
         st.session_state.value_filter_mode = "Any"
         value_filter_mode = "Any"
         st.info("평균 거래대금 데이터가 없어 해당 필터를 비활성화했습니다.")
-    st.caption(
+    _render_descriptive_caption(
         _format_volume_caption("평균 거래대금", value_filter_mode, value_bucket, value_min_custom, value_max_custom, "원")
     )
 
@@ -762,51 +819,13 @@ with descriptive_tab:
         st.session_state.relvol_filter_mode = "Any"
         relvol_filter_mode = "Any"
         st.info("relative_value 데이터가 없어 해당 필터를 비활성화했습니다.")
-    st.caption(
+    _render_descriptive_caption(
         _format_volume_caption("상대거래량", relvol_filter_mode, relvol_bucket, relvol_min_custom, relvol_max_custom, "x")
     )
 
-    momentum_cols = st.columns([1, 1, 1, 1, 1])
-    with momentum_cols[0]:
-        momentum_metric = st.selectbox(
-            "강도기준",
-            list(MOMENTUM_METRICS.keys()),
-            key="momentum_metric",
-            format_func=lambda key: MOMENTUM_METRICS.get(key, key),
-            disabled=not momentum_available,
-        )
-    with momentum_cols[1]:
-        momentum_filter_mode = st.selectbox(
-            "강도필터",
-            list(MOMENTUM_MODES),
-            key="momentum_filter_mode",
-            disabled=not momentum_available,
-        )
-    with momentum_cols[2]:
-        momentum_bucket = st.selectbox(
-            "강도구간",
-            list(MOMENTUM_BUCKETS.keys()),
-            key="momentum_bucket",
-            disabled=(not momentum_available) or (momentum_filter_mode != "구간 선택"),
-        )
-    with momentum_cols[3]:
-        momentum_min_custom = st.number_input(
-            "최소",
-            step=0.01,
-            format="%.2f",
-            key="momentum_min_custom",
-            disabled=(not momentum_available) or (momentum_filter_mode != "직접 입력"),
-            help="수익률/비율 값",
-        )
-    with momentum_cols[4]:
-        momentum_max_custom = st.number_input(
-            "최대",
-            step=0.01,
-            format="%.2f",
-            key="momentum_max_custom",
-            disabled=(not momentum_available) or (momentum_filter_mode != "직접 입력"),
-            help="수익률/비율 값",
-        )
+    momentum_metric, momentum_filter_mode, momentum_bucket, momentum_min_custom, momentum_max_custom = _render_momentum_filter(
+        row_disabled=not momentum_available
+    )
     if momentum_metric not in available_momentum_metrics and available_momentum_metrics:
         st.session_state.momentum_metric = available_momentum_metrics[0]
         momentum_metric = st.session_state.momentum_metric
