@@ -363,16 +363,92 @@ def _format_range_summary(mode: str, bucket: str, min_custom: float, max_custom:
 
 
 def _format_volume_caption(label: str, mode: str, bucket: str, min_custom: float, max_custom: float, unit: str = "") -> str:
+    if mode == "Any":
+        return "전체"
     if mode == "구간 선택":
-        return f"{label} {bucket}"
+        return f"구간: {bucket}"
     if mode == "직접 입력":
         if min_custom and max_custom:
-            return f"{label} {min_custom:g}{unit} ~ {max_custom:g}{unit}"
+            return f"직접 입력: {min_custom:g}{unit} ~ {max_custom:g}{unit}"
         if min_custom:
-            return f"{label} {min_custom:g}{unit} 이상"
+            return f"직접 입력: {min_custom:g}{unit} 이상"
         if max_custom:
-            return f"{label} {max_custom:g}{unit} 이하"
-    return f"{label} Any"
+            return f"직접 입력: {max_custom:g}{unit} 이하"
+    return "전체"
+
+
+def _render_descriptive_range_filter(
+    *,
+    title: str,
+    mode_key: str,
+    mode_options: tuple[str, ...],
+    bucket_key: str,
+    bucket_options: dict[str, tuple[float | None, float | None]],
+    min_key: str,
+    max_key: str,
+    step: float,
+    unit_help: str,
+    mode_help: str | None = None,
+    row_disabled: bool = False,
+) -> tuple[str, str, float, float]:
+    st.markdown(f"#### {title}")
+    cols = st.columns(4)
+    with cols[0]:
+        if row_disabled:
+            st.markdown("<div style='opacity: 0.45'>", unsafe_allow_html=True)
+        mode = st.selectbox(
+            "모드",
+            list(mode_options),
+            key=mode_key,
+            disabled=row_disabled,
+            help=mode_help if not row_disabled else None,
+        )
+        if row_disabled:
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    bucket_disabled = row_disabled or mode != "구간 선택"
+    with cols[1]:
+        if bucket_disabled:
+            st.markdown("<div style='opacity: 0.45'>", unsafe_allow_html=True)
+        bucket = st.selectbox(
+            "구간",
+            list(bucket_options.keys()),
+            key=bucket_key,
+            disabled=bucket_disabled,
+        )
+        if bucket_disabled:
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    direct_input_disabled = row_disabled or mode != "직접 입력"
+    with cols[2]:
+        if direct_input_disabled:
+            st.markdown("<div style='opacity: 0.45'>", unsafe_allow_html=True)
+        min_custom = st.number_input(
+            "최소",
+            min_value=0.0,
+            step=step,
+            key=min_key,
+            disabled=direct_input_disabled,
+            help=unit_help if not direct_input_disabled else None,
+        )
+        if direct_input_disabled:
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    with cols[3]:
+        if direct_input_disabled:
+            st.markdown("<div style='opacity: 0.45'>", unsafe_allow_html=True)
+        max_custom = st.number_input(
+            "최대",
+            min_value=0.0,
+            step=step,
+            key=max_key,
+            disabled=direct_input_disabled,
+            help=unit_help if not direct_input_disabled else None,
+        )
+        if direct_input_disabled:
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    return mode, bucket, min_custom, max_custom
 
 
 query_params = _get_query_params()
@@ -612,136 +688,55 @@ with descriptive_tab:
     raw_tickers = [token.strip().upper() for token in re.split(r"[\s,]+", ticker_input or "") if token.strip()]
     ticker_list = list(dict.fromkeys(raw_tickers))
 
-    st.markdown("#### 시가총액")
-    mcap_cols = st.columns([1, 1, 1, 1, 1])
-    with mcap_cols[0]:
-        mcap_filter_mode = st.selectbox("시총", list(MCAP_MODES), key="mcap_filter_mode")
-    with mcap_cols[1]:
-        mcap_bucket = st.selectbox(
-            "시총 구간",
-            list(MCAP_BUCKETS.keys()),
-            key="mcap_bucket",
-            disabled=mcap_filter_mode != "구간 선택",
-        )
-    with mcap_cols[2]:
-        mcap_min_custom = st.number_input(
-            "최소",
-            min_value=0.0,
-            step=100_000_000.0,
-            key="mcap_min_custom",
-            disabled=mcap_filter_mode != "직접 입력",
-            help="단위: 원",
-        )
-    with mcap_cols[3]:
-        mcap_max_custom = st.number_input(
-            "최대",
-            min_value=0.0,
-            step=100_000_000.0,
-            key="mcap_max_custom",
-            disabled=mcap_filter_mode != "직접 입력",
-            help="단위: 원",
-        )
+    mcap_filter_mode, mcap_bucket, mcap_min_custom, mcap_max_custom = _render_descriptive_range_filter(
+        title="시가총액",
+        mode_key="mcap_filter_mode",
+        mode_options=MCAP_MODES,
+        bucket_key="mcap_bucket",
+        bucket_options=MCAP_BUCKETS,
+        min_key="mcap_min_custom",
+        max_key="mcap_max_custom",
+        step=100_000_000.0,
+        unit_help="단위: 원",
+    )
 
-    st.markdown("#### 가격")
-    price_cols = st.columns([1, 1, 1, 1, 1])
-    with price_cols[0]:
-        price_filter_mode = st.selectbox("가격", list(PRICE_MODES), key="price_filter_mode")
-    with price_cols[1]:
-        price_bucket = st.selectbox(
-            "가격 구간",
-            list(PRICE_BUCKETS.keys()),
-            key="price_bucket",
-            disabled=price_filter_mode != "구간 선택",
-        )
-    with price_cols[2]:
-        price_min_custom = st.number_input(
-            "최소",
-            min_value=0.0,
-            step=100.0,
-            key="price_min_custom",
-            disabled=price_filter_mode != "직접 입력",
-            help="단위: 원",
-        )
-    with price_cols[3]:
-        price_max_custom = st.number_input(
-            "최대",
-            min_value=0.0,
-            step=100.0,
-            key="price_max_custom",
-            disabled=price_filter_mode != "직접 입력",
-            help="단위: 원",
-        )
+    price_filter_mode, price_bucket, price_min_custom, price_max_custom = _render_descriptive_range_filter(
+        title="가격",
+        mode_key="price_filter_mode",
+        mode_options=PRICE_MODES,
+        bucket_key="price_bucket",
+        bucket_options=PRICE_BUCKETS,
+        min_key="price_min_custom",
+        max_key="price_max_custom",
+        step=100.0,
+        unit_help="단위: 원",
+    )
 
-    st.markdown("#### 배당")
-    div_cols = st.columns([1, 1, 1, 1, 1])
-    with div_cols[0]:
-        div_filter_mode = st.selectbox("배당", list(DIV_MODES), key="div_filter_mode")
-    with div_cols[1]:
-        div_bucket = st.selectbox(
-            "배당 구간",
-            list(DIV_BUCKETS.keys()),
-            key="div_bucket",
-            disabled=div_filter_mode != "구간 선택",
-        )
-    with div_cols[2]:
-        div_min_custom = st.number_input(
-            "최소",
-            min_value=0.0,
-            step=0.1,
-            key="div_min_custom",
-            disabled=div_filter_mode != "직접 입력",
-            help="단위: %",
-        )
-    with div_cols[3]:
-        div_max_custom = st.number_input(
-            "최대",
-            min_value=0.0,
-            step=0.1,
-            key="div_max_custom",
-            disabled=div_filter_mode != "직접 입력",
-            help="단위: %",
-        )
+    div_filter_mode, div_bucket, div_min_custom, div_max_custom = _render_descriptive_range_filter(
+        title="배당",
+        mode_key="div_filter_mode",
+        mode_options=DIV_MODES,
+        bucket_key="div_bucket",
+        bucket_options=DIV_BUCKETS,
+        min_key="div_min_custom",
+        max_key="div_max_custom",
+        step=0.1,
+        unit_help="단위: %",
+    )
 
-    st.markdown("#### 평균 거래대금")
-    value_bucket = st.session_state.get("value_bucket", "전체")
-    value_min_custom = st.session_state.get("value_min_custom", 0.0)
-    value_max_custom = st.session_state.get("value_max_custom", 0.0)
-    value_cols = st.columns(4)
-    with value_cols[0]:
-        value_filter_mode = st.selectbox(
-            "평균 거래대금(20D)",
-            list(VALUE_MODES),
-            key="value_filter_mode",
-            disabled=not avg_value_available,
-            help="avg_value_20d = 최근 20거래일 일평균 거래대금",
-        )
-    with value_cols[1]:
-        if avg_value_available and value_filter_mode == "구간 선택":
-            value_bucket = st.selectbox("구간", list(VALUE_BUCKETS.keys()), key="value_bucket")
-        else:
-            st.empty()
-    with value_cols[2]:
-        if avg_value_available and value_filter_mode == "직접 입력":
-            value_min_custom = st.number_input(
-                "최소",
-                min_value=0.0,
-                step=100_000_000.0,
-                key="value_min_custom",
-                help="단위: 원",
-            )
-        else:
-            st.empty()
-    with value_cols[3]:
-        if avg_value_available and value_filter_mode == "직접 입력":
-            value_max_custom = st.number_input(
-                "최대",
-                min_value=0.0,
-                step=100_000_000.0,
-                key="value_max_custom",
-                help="단위: 원",
-            )
-        else:
-            st.empty()
+    value_filter_mode, value_bucket, value_min_custom, value_max_custom = _render_descriptive_range_filter(
+        title="평균 거래대금",
+        mode_key="value_filter_mode",
+        mode_options=VALUE_MODES,
+        bucket_key="value_bucket",
+        bucket_options=VALUE_BUCKETS,
+        min_key="value_min_custom",
+        max_key="value_max_custom",
+        step=100_000_000.0,
+        unit_help="단위: 원",
+        mode_help="avg_value_20d = 최근 20거래일 일평균 거래대금",
+        row_disabled=not avg_value_available,
+    )
     if not avg_value_available:
         st.session_state.value_filter_mode = "Any"
         value_filter_mode = "Any"
@@ -750,46 +745,19 @@ with descriptive_tab:
         _format_volume_caption("평균 거래대금", value_filter_mode, value_bucket, value_min_custom, value_max_custom, "원")
     )
 
-    st.markdown("#### 상대거래량")
-    relvol_bucket = st.session_state.get("relvol_bucket", "전체")
-    relvol_min_custom = st.session_state.get("relvol_min_custom", 0.0)
-    relvol_max_custom = st.session_state.get("relvol_max_custom", 0.0)
-    rel_cols = st.columns(4)
-    with rel_cols[0]:
-        relvol_filter_mode = st.selectbox(
-            "상대거래량 (현재/20D)",
-            list(RELVOL_MODES),
-            key="relvol_filter_mode",
-            disabled=not relative_value_available,
-            help="상대거래량 = current_value / avg_value_20d",
-        )
-    with rel_cols[1]:
-        if relative_value_available and relvol_filter_mode == "구간 선택":
-            relvol_bucket = st.selectbox("구간", list(RELVOL_BUCKETS.keys()), key="relvol_bucket")
-        else:
-            st.empty()
-    with rel_cols[2]:
-        if relative_value_available and relvol_filter_mode == "직접 입력":
-            relvol_min_custom = st.number_input(
-                "최소",
-                min_value=0.0,
-                step=0.1,
-                key="relvol_min_custom",
-                help="단위: x",
-            )
-        else:
-            st.empty()
-    with rel_cols[3]:
-        if relative_value_available and relvol_filter_mode == "직접 입력":
-            relvol_max_custom = st.number_input(
-                "최대",
-                min_value=0.0,
-                step=0.1,
-                key="relvol_max_custom",
-                help="단위: x",
-            )
-        else:
-            st.empty()
+    relvol_filter_mode, relvol_bucket, relvol_min_custom, relvol_max_custom = _render_descriptive_range_filter(
+        title="상대거래량",
+        mode_key="relvol_filter_mode",
+        mode_options=RELVOL_MODES,
+        bucket_key="relvol_bucket",
+        bucket_options=RELVOL_BUCKETS,
+        min_key="relvol_min_custom",
+        max_key="relvol_max_custom",
+        step=0.1,
+        unit_help="단위: x",
+        mode_help="상대거래량 = current_value / avg_value_20d",
+        row_disabled=not relative_value_available,
+    )
     if not relative_value_available:
         st.session_state.relvol_filter_mode = "Any"
         relvol_filter_mode = "Any"
