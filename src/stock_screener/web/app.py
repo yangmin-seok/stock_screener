@@ -49,6 +49,10 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("div_bucket", "str", "전체"),
     FilterSpec("div_min_custom", "float", 0.0),
     FilterSpec("div_max_custom", "float", 0.0),
+    FilterSpec("value_filter_mode", "str", "Any"),
+    FilterSpec("value_bucket", "str", "전체"),
+    FilterSpec("value_min_custom", "float", 0.0),
+    FilterSpec("value_max_custom", "float", 0.0),
     FilterSpec("relvol_filter_mode", "str", "Any"),
     FilterSpec("relvol_bucket", "str", "전체"),
     FilterSpec("relvol_min_custom", "float", 0.0),
@@ -58,8 +62,6 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("momentum_bucket", "str", "전체"),
     FilterSpec("momentum_min_custom", "float", 0.0),
     FilterSpec("momentum_max_custom", "float", 0.0),
-    FilterSpec("apply_value_min", "bool", False),
-    FilterSpec("value_min", "float", 0.0),
     FilterSpec("apply_pbr_max", "bool", False),
     FilterSpec("pbr_max", "float", 1.0),
     FilterSpec("apply_roe_min", "bool", False),
@@ -112,6 +114,14 @@ DIV_BUCKETS: dict[str, tuple[float | None, float | None]] = {
     "5% 이상": (5.0, None),
 }
 
+VALUE_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "1억 미만": (None, 100_000_000),
+    "1억~5억": (100_000_000, 500_000_000),
+    "5억~20억": (500_000_000, 2_000_000_000),
+    "20억 이상": (2_000_000_000, None),
+}
+
 RELVOL_BUCKETS: dict[str, tuple[float | None, float | None]] = {
     "전체": (None, None),
     "0.5x 이하": (None, 0.5),
@@ -124,6 +134,7 @@ RELVOL_BUCKETS: dict[str, tuple[float | None, float | None]] = {
 MCAP_MODES = ("Any", "구간 선택", "직접 입력")
 PRICE_MODES = ("Any", "구간 선택", "직접 입력")
 DIV_MODES = ("Any", "구간 선택", "직접 입력")
+VALUE_MODES = ("Any", "구간 선택", "직접 입력")
 RELVOL_MODES = ("Any", "구간 선택", "직접 입력")
 MOMENTUM_MODES = ("Any", "구간 선택", "직접 입력")
 MOMENTUM_METRICS: dict[str, str] = {
@@ -367,6 +378,12 @@ if "query_params_restored" not in st.session_state:
         if new_key not in query_params and legacy_key in query_params:
             query_params[new_key] = query_params[legacy_key]
 
+    if query_params.get("apply_value_min") == "1":
+        if "value_filter_mode" not in query_params:
+            query_params["value_filter_mode"] = "직접 입력"
+        if "value_min_custom" not in query_params and "value_min" in query_params:
+            query_params["value_min_custom"] = query_params["value_min"]
+
     for spec in FILTER_SPECS:
         try:
             st.session_state[spec.name] = _parse_query_filter_value(spec, query_params)
@@ -383,6 +400,9 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("div_filter_mode") not in DIV_MODES:
         st.session_state.div_filter_mode = "Any"
         st.session_state.query_parse_errors.append("div_filter_mode")
+    if st.session_state.get("value_filter_mode") not in VALUE_MODES:
+        st.session_state.value_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("value_filter_mode")
     if st.session_state.get("relvol_filter_mode") not in RELVOL_MODES:
         st.session_state.relvol_filter_mode = "Any"
         st.session_state.query_parse_errors.append("relvol_filter_mode")
@@ -399,6 +419,9 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("div_bucket") not in DIV_BUCKETS:
         st.session_state.div_bucket = "전체"
         st.session_state.query_parse_errors.append("div_bucket")
+    if st.session_state.get("value_bucket") not in VALUE_BUCKETS:
+        st.session_state.value_bucket = "전체"
+        st.session_state.query_parse_errors.append("value_bucket")
     if st.session_state.get("relvol_bucket") not in RELVOL_BUCKETS:
         st.session_state.relvol_bucket = "전체"
         st.session_state.query_parse_errors.append("relvol_bucket")
@@ -423,6 +446,8 @@ if st.session_state.get("price_filter_mode") not in PRICE_MODES:
     st.session_state.price_filter_mode = "Any"
 if st.session_state.get("div_filter_mode") not in DIV_MODES:
     st.session_state.div_filter_mode = "Any"
+if st.session_state.get("value_filter_mode") not in VALUE_MODES:
+    st.session_state.value_filter_mode = "Any"
 if st.session_state.get("relvol_filter_mode") not in RELVOL_MODES:
     st.session_state.relvol_filter_mode = "Any"
 if st.session_state.get("momentum_filter_mode") not in MOMENTUM_MODES:
@@ -434,6 +459,8 @@ if st.session_state.get("price_bucket") not in PRICE_BUCKETS:
     st.session_state.price_bucket = "전체"
 if st.session_state.get("div_bucket") not in DIV_BUCKETS:
     st.session_state.div_bucket = "전체"
+if st.session_state.get("value_bucket") not in VALUE_BUCKETS:
+    st.session_state.value_bucket = "전체"
 if st.session_state.get("relvol_bucket") not in RELVOL_BUCKETS:
     st.session_state.relvol_bucket = "전체"
 if st.session_state.get("momentum_bucket") not in MOMENTUM_BUCKETS:
@@ -539,7 +566,7 @@ def _active_filter_count_from_state() -> int:
             int(st.session_state.get("div_filter_mode", "Any") != "Any"),
             int(relative_value_available and st.session_state.get("relvol_filter_mode", "Any") != "Any"),
             int(momentum_available and st.session_state.get("momentum_filter_mode", "Any") != "Any"),
-            int(bool(st.session_state.get("apply_value_min", False))),
+            int(avg_value_available and st.session_state.get("value_filter_mode", "Any") != "Any"),
             int(bool(st.session_state.get("apply_pbr_max", False))),
             int(bool(st.session_state.get("apply_reserve_ratio_min", False))),
             int(bool(st.session_state.get("apply_roe_min", False))),
@@ -662,21 +689,43 @@ with descriptive_tab:
             help="단위: %",
         )
 
-    st.markdown("#### 거래량")
-    value_cols = st.columns(4)
+    st.markdown("#### 거래대금")
+    value_cols = st.columns([1, 1, 1, 1, 1])
     with value_cols[0]:
-        apply_value_min = st.checkbox("20D 거래대금", key="apply_value_min", disabled=not avg_value_available)
+        value_filter_mode = st.selectbox(
+            "20D 거래대금",
+            list(VALUE_MODES),
+            key="value_filter_mode",
+            disabled=not avg_value_available,
+        )
     with value_cols[1]:
-        value_min = st.number_input(
+        value_bucket = st.selectbox(
+            "거래대금 구간",
+            list(VALUE_BUCKETS.keys()),
+            key="value_bucket",
+            disabled=(not avg_value_available) or (value_filter_mode != "구간 선택"),
+        )
+    with value_cols[2]:
+        value_min_custom = st.number_input(
             "최소",
             min_value=0.0,
             step=100_000_000.0,
-            key="value_min",
-            disabled=(not avg_value_available) or (not apply_value_min),
+            key="value_min_custom",
+            disabled=(not avg_value_available) or (value_filter_mode != "직접 입력"),
+            help="단위: 원",
+        )
+    with value_cols[3]:
+        value_max_custom = st.number_input(
+            "최대",
+            min_value=0.0,
+            step=100_000_000.0,
+            key="value_max_custom",
+            disabled=(not avg_value_available) or (value_filter_mode != "직접 입력"),
             help="단위: 원",
         )
     if not avg_value_available:
-        st.session_state.apply_value_min = False
+        st.session_state.value_filter_mode = "Any"
+        value_filter_mode = "Any"
         st.info("평균 거래대금 데이터가 없어 해당 필터를 비활성화했습니다.")
 
     st.markdown("#### 상대강도")
@@ -893,8 +942,19 @@ elif momentum_available and momentum_filter_mode == "직접 입력":
     if momentum_max_custom != 0:
         filtered = filtered[filtered[momentum_metric] <= momentum_max_custom]
 
-if apply_value_min:
-    filtered = filtered[filtered["avg_value_20d"] >= value_min]
+if avg_value_available and value_filter_mode == "구간 선택":
+    value_min, value_max = VALUE_BUCKETS.get(value_bucket, (None, None))
+    filtered = filtered[filtered["avg_value_20d"].notna()]
+    if value_min is not None:
+        filtered = filtered[filtered["avg_value_20d"] >= value_min]
+    if value_max is not None:
+        filtered = filtered[filtered["avg_value_20d"] < value_max]
+elif avg_value_available and value_filter_mode == "직접 입력":
+    filtered = filtered[filtered["avg_value_20d"].notna()]
+    if value_min_custom > 0:
+        filtered = filtered[filtered["avg_value_20d"] >= value_min_custom]
+    if value_max_custom > 0:
+        filtered = filtered[filtered["avg_value_20d"] <= value_max_custom]
 if apply_pbr_max:
     filtered = filtered[(filtered["pbr"].notna()) & (filtered["pbr"] <= pbr_max)]
 if apply_reserve_ratio_min:
@@ -947,6 +1007,12 @@ if div_filter_mode != "직접 입력":
 if div_filter_mode != "구간 선택":
     query_filter_state.pop("div_bucket", None)
 
+if value_filter_mode != "직접 입력":
+    query_filter_state.pop("value_min_custom", None)
+    query_filter_state.pop("value_max_custom", None)
+if value_filter_mode != "구간 선택":
+    query_filter_state.pop("value_bucket", None)
+
 if relvol_filter_mode != "직접 입력":
     query_filter_state.pop("relvol_min_custom", None)
     query_filter_state.pop("relvol_max_custom", None)
@@ -990,8 +1056,10 @@ if price_filter_mode != "Any":
     condition_summaries.append(f"가격 {_format_range_summary(price_filter_mode, price_bucket, price_min_custom, price_max_custom)}")
 if div_filter_mode != "Any":
     condition_summaries.append(f"배당 {_format_range_summary(div_filter_mode, div_bucket, div_min_custom, div_max_custom)}")
-if apply_value_min:
-    condition_summaries.append(f"20D 거래대금 ≥ {value_min:,.0f}")
+if avg_value_available and value_filter_mode != "Any":
+    condition_summaries.append(
+        f"20D 거래대금 {_format_range_summary(value_filter_mode, value_bucket, value_min_custom, value_max_custom)}"
+    )
 if relative_value_available and relvol_filter_mode != "Any":
     condition_summaries.append(
         f"상대거래대금 {_format_range_summary(relvol_filter_mode, relvol_bucket, relvol_min_custom, relvol_max_custom)}"
