@@ -49,6 +49,10 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("div_bucket", "str", "전체"),
     FilterSpec("div_min_custom", "float", 0.0),
     FilterSpec("div_max_custom", "float", 0.0),
+    FilterSpec("relvol_filter_mode", "str", "Any"),
+    FilterSpec("relvol_bucket", "str", "전체"),
+    FilterSpec("relvol_min_custom", "float", 0.0),
+    FilterSpec("relvol_max_custom", "float", 0.0),
     FilterSpec("apply_value_min", "bool", False),
     FilterSpec("value_min", "float", 0.0),
     FilterSpec("apply_pbr_max", "bool", False),
@@ -103,10 +107,19 @@ DIV_BUCKETS: dict[str, tuple[float | None, float | None]] = {
     "5% 이상": (5.0, None),
 }
 
+RELVOL_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "0.5x 이하": (None, 0.5),
+    "1x 이상": (1.0, None),
+    "2x 이상": (2.0, None),
+    "3x 이상": (3.0, None),
+}
+
 # Keep explicit mode constants to avoid key drift and to support legacy state migration.
 MCAP_MODES = ("Any", "구간 선택", "직접 입력")
 PRICE_MODES = ("Any", "구간 선택", "직접 입력")
 DIV_MODES = ("Any", "구간 선택", "직접 입력")
+RELVOL_MODES = ("Any", "구간 선택", "직접 입력")
 
 
 def _get_query_params() -> dict[str, Any]:
@@ -332,6 +345,9 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("div_filter_mode") not in DIV_MODES:
         st.session_state.div_filter_mode = "Any"
         st.session_state.query_parse_errors.append("div_filter_mode")
+    if st.session_state.get("relvol_filter_mode") not in RELVOL_MODES:
+        st.session_state.relvol_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("relvol_filter_mode")
 
     if st.session_state.get("mcap_bucket") not in MCAP_BUCKETS:
         st.session_state.mcap_bucket = "전체"
@@ -342,6 +358,9 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("div_bucket") not in DIV_BUCKETS:
         st.session_state.div_bucket = "전체"
         st.session_state.query_parse_errors.append("div_bucket")
+    if st.session_state.get("relvol_bucket") not in RELVOL_BUCKETS:
+        st.session_state.relvol_bucket = "전체"
+        st.session_state.query_parse_errors.append("relvol_bucket")
 
     st.session_state.query_params_restored = True
 
@@ -357,6 +376,8 @@ if st.session_state.get("price_filter_mode") not in PRICE_MODES:
     st.session_state.price_filter_mode = "Any"
 if st.session_state.get("div_filter_mode") not in DIV_MODES:
     st.session_state.div_filter_mode = "Any"
+if st.session_state.get("relvol_filter_mode") not in RELVOL_MODES:
+    st.session_state.relvol_filter_mode = "Any"
 
 if st.session_state.get("mcap_bucket") not in MCAP_BUCKETS:
     st.session_state.mcap_bucket = "전체"
@@ -364,6 +385,8 @@ if st.session_state.get("price_bucket") not in PRICE_BUCKETS:
     st.session_state.price_bucket = "전체"
 if st.session_state.get("div_bucket") not in DIV_BUCKETS:
     st.session_state.div_bucket = "전체"
+if st.session_state.get("relvol_bucket") not in RELVOL_BUCKETS:
+    st.session_state.relvol_bucket = "전체"
 
 _poll_background_job()
 
@@ -449,6 +472,7 @@ st.markdown("### 조건 선택")
 st.caption("조건은 Any + 임계치 방식으로 설정되며, 계산 불가한 항목은 자동 비활성화됩니다.")
 
 avg_value_available = "avg_value_20d" in base.columns and base["avg_value_20d"].notna().any()
+relative_value_available = "relative_value" in base.columns and base["relative_value"].notna().any()
 
 descriptive_tab, fundamental_tab, technical_tab = st.tabs(["Descriptive", "Fundamental", "Technical"])
 
@@ -510,6 +534,36 @@ with descriptive_tab:
         key="div_max_custom",
         disabled=div_filter_mode != "직접 입력",
     )
+
+    relvol_filter_mode = st.selectbox(
+        "상대 거래대금(relative_value) 필터",
+        list(RELVOL_MODES),
+        key="relvol_filter_mode",
+        disabled=not relative_value_available,
+    )
+    relvol_bucket = st.selectbox(
+        "상대 거래대금 구간",
+        list(RELVOL_BUCKETS.keys()),
+        key="relvol_bucket",
+        disabled=(not relative_value_available) or (relvol_filter_mode != "구간 선택"),
+    )
+    relvol_min_custom = st.number_input(
+        "최소 상대 거래대금(x)",
+        min_value=0.0,
+        step=0.1,
+        key="relvol_min_custom",
+        disabled=(not relative_value_available) or (relvol_filter_mode != "직접 입력"),
+    )
+    relvol_max_custom = st.number_input(
+        "최대 상대 거래대금(x)",
+        min_value=0.0,
+        step=0.1,
+        key="relvol_max_custom",
+        disabled=(not relative_value_available) or (relvol_filter_mode != "직접 입력"),
+    )
+    if not relative_value_available:
+        st.session_state.relvol_filter_mode = "Any"
+        st.info("relative_value 데이터가 없어 해당 필터를 비활성화했습니다.")
 
     apply_value_min = st.checkbox("최소 평균 거래대금(20D) 적용", key="apply_value_min", disabled=not avg_value_available)
     value_min = st.number_input(
@@ -578,6 +632,7 @@ active_filter_count = sum(
         int(mcap_filter_mode != "Any"),
         int(price_filter_mode != "Any"),
         int(div_filter_mode != "Any"),
+        int(relvol_filter_mode != "Any"),
         int(apply_value_min),
         int(apply_pbr_max),
         int(apply_reserve_ratio_min),
@@ -640,6 +695,21 @@ elif div_filter_mode == "직접 입력":
         filtered = filtered[filtered["div"] >= div_min_custom]
     if div_max_custom > 0:
         filtered = filtered[filtered["div"] <= div_max_custom]
+
+if relvol_filter_mode == "구간 선택":
+    relvol_min, relvol_max = RELVOL_BUCKETS.get(relvol_bucket, (None, None))
+    filtered = filtered[filtered["relative_value"].notna()]
+    if relvol_min is not None:
+        filtered = filtered[filtered["relative_value"] >= relvol_min]
+    if relvol_max is not None:
+        filtered = filtered[filtered["relative_value"] <= relvol_max]
+elif relvol_filter_mode == "직접 입력":
+    filtered = filtered[filtered["relative_value"].notna()]
+    if relvol_min_custom > 0:
+        filtered = filtered[filtered["relative_value"] >= relvol_min_custom]
+    if relvol_max_custom > 0:
+        filtered = filtered[filtered["relative_value"] <= relvol_max_custom]
+
 if apply_value_min:
     filtered = filtered[filtered["avg_value_20d"] >= value_min]
 if apply_pbr_max:
@@ -690,6 +760,12 @@ if div_filter_mode != "직접 입력":
     query_filter_state.pop("div_max_custom", None)
 if div_filter_mode != "구간 선택":
     query_filter_state.pop("div_bucket", None)
+
+if relvol_filter_mode != "직접 입력":
+    query_filter_state.pop("relvol_min_custom", None)
+    query_filter_state.pop("relvol_max_custom", None)
+if relvol_filter_mode != "구간 선택":
+    query_filter_state.pop("relvol_bucket", None)
 
 _set_query_params(query_filter_state)
 
