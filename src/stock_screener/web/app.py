@@ -689,18 +689,19 @@ with descriptive_tab:
             help="단위: %",
         )
 
-    st.markdown("#### 거래대금")
+    st.markdown("#### 유동성")
     value_cols = st.columns([1, 1, 1, 1, 1])
     with value_cols[0]:
         value_filter_mode = st.selectbox(
-            "20D 거래대금",
+            "평균 거래대금(20D)",
             list(VALUE_MODES),
             key="value_filter_mode",
             disabled=not avg_value_available,
+            help="avg_value_20d = 최근 20거래일 일평균 거래대금",
         )
     with value_cols[1]:
         value_bucket = st.selectbox(
-            "거래대금 구간",
+            "평균 거래대금 구간",
             list(VALUE_BUCKETS.keys()),
             key="value_bucket",
             disabled=(not avg_value_available) or (value_filter_mode != "구간 선택"),
@@ -728,19 +729,19 @@ with descriptive_tab:
         value_filter_mode = "Any"
         st.info("평균 거래대금 데이터가 없어 해당 필터를 비활성화했습니다.")
 
-    st.markdown("#### 상대강도")
+    st.markdown("#### 상대거래량")
     rel_cols = st.columns([1, 1, 1, 1, 1])
     with rel_cols[0]:
         relvol_filter_mode = st.selectbox(
-            "상대거래대금",
+            "상대거래량 (현재/20D)",
             list(RELVOL_MODES),
             key="relvol_filter_mode",
             disabled=not relative_value_available,
-            help="relative_value 배수",
+            help="상대거래량 = current_value / avg_value_20d",
         )
     with rel_cols[1]:
         relvol_bucket = st.selectbox(
-            "거래강도 구간",
+            "상대거래량 구간",
             list(RELVOL_BUCKETS.keys()),
             key="relvol_bucket",
             disabled=(not relative_value_available) or (relvol_filter_mode != "구간 선택"),
@@ -1058,11 +1059,11 @@ if div_filter_mode != "Any":
     condition_summaries.append(f"배당 {_format_range_summary(div_filter_mode, div_bucket, div_min_custom, div_max_custom)}")
 if avg_value_available and value_filter_mode != "Any":
     condition_summaries.append(
-        f"20D 거래대금 {_format_range_summary(value_filter_mode, value_bucket, value_min_custom, value_max_custom)}"
+        f"평균 거래대금(20D) {_format_range_summary(value_filter_mode, value_bucket, value_min_custom, value_max_custom)}"
     )
 if relative_value_available and relvol_filter_mode != "Any":
     condition_summaries.append(
-        f"상대거래대금 {_format_range_summary(relvol_filter_mode, relvol_bucket, relvol_min_custom, relvol_max_custom)}"
+        f"상대거래량(현재/20D) {_format_range_summary(relvol_filter_mode, relvol_bucket, relvol_min_custom, relvol_max_custom)}"
     )
 if momentum_available and momentum_filter_mode != "Any":
     condition_summaries.append(
@@ -1077,7 +1078,20 @@ show_cols = [
     "eps", "bps", "roe_proxy", "eps_positive", "ret_3m", "ret_6m", "ret_1y", "dist_sma200", "pos_52w",
     "near_52w_high_ratio", "eps_cagr_5y", "eps_yoy_q",
 ]
-st.dataframe(filtered[show_cols], width="stretch", hide_index=True)
+st.dataframe(
+    filtered[show_cols],
+    width="stretch",
+    hide_index=True,
+    column_config={
+        "avg_value_20d": st.column_config.NumberColumn("평균 거래대금(20D)", format="%,d"),
+        "current_value": st.column_config.NumberColumn("현재 거래대금", format="%,d"),
+        "relative_value": st.column_config.NumberColumn(
+            "상대거래량 (현재/20D)",
+            format="%.2fx",
+            help="상대거래량 = current_value / avg_value_20d",
+        ),
+    },
+)
 
 csv = filtered[show_cols].to_csv(index=False).encode("utf-8-sig")
 st.download_button("CSV 다운로드", data=csv, file_name=f"screener_{asof}.csv", mime="text/csv")
