@@ -336,60 +336,19 @@ def _render_active_job_panel() -> None:
             _safe_rerun()
 
 
-def render_range_filter(
-    *,
-    label: str,
-    mode_key: str,
-    bucket_key: str,
-    min_key: str,
-    max_key: str,
-    modes: tuple[str, ...],
-    buckets: dict[str, tuple[float | None, float | None]],
-    bucket_label: str,
-    min_label: str,
-    max_label: str,
-    min_value: float | None = 0.0,
-    step: float = 1.0,
-    disabled: bool = False,
-    number_format: str | None = None,
-) -> tuple[str, str, float, float]:
-    mode = st.selectbox(label, list(modes), key=mode_key, disabled=disabled)
+def _reset_all_filters() -> None:
+    for spec in FILTER_SPECS:
+        st.session_state[spec.name] = spec.default
 
-    bucket = st.session_state.get(bucket_key, "전체")
-    min_custom = float(st.session_state.get(min_key, 0.0))
-    max_custom = float(st.session_state.get(max_key, 0.0))
 
+def _format_range_summary(mode: str, bucket: str, min_custom: float, max_custom: float) -> str:
     if mode == "구간 선택":
-        bucket = st.selectbox(
-            bucket_label,
-            list(buckets.keys()),
-            key=bucket_key,
-            disabled=disabled,
-        )
-    elif mode == "직접 입력":
-        number_kwargs: dict[str, Any] = {
-            "step": step,
-            "key": min_key,
-            "disabled": disabled,
-        }
-        if min_value is not None:
-            number_kwargs["min_value"] = min_value
-        if number_format is not None:
-            number_kwargs["format"] = number_format
-        min_custom = st.number_input(min_label, **number_kwargs)
-
-        number_kwargs = {
-            "step": step,
-            "key": max_key,
-            "disabled": disabled,
-        }
-        if min_value is not None:
-            number_kwargs["min_value"] = min_value
-        if number_format is not None:
-            number_kwargs["format"] = number_format
-        max_custom = st.number_input(max_label, **number_kwargs)
-
-    return mode, bucket, float(min_custom), float(max_custom)
+        return bucket
+    if mode == "직접 입력":
+        min_text = f"{min_custom:g}" if min_custom else "-"
+        max_text = f"{max_custom:g}" if max_custom else "-"
+        return f"{min_text}~{max_text}"
+    return "Any"
 
 
 query_params = _get_query_params()
@@ -570,132 +529,243 @@ relative_value_available = "relative_value" in base.columns and base["relative_v
 available_momentum_metrics = [metric for metric in MOMENTUM_METRICS if metric in base.columns and base[metric].notna().any()]
 momentum_available = bool(available_momentum_metrics)
 
+def _active_filter_count_from_state() -> int:
+    return sum(
+        [
+            int(bool([token.strip() for token in re.split(r"[\s,]+", st.session_state.get("ticker_input", "") or "") if token.strip()])),
+            int(bool(st.session_state.get("mkt", []))),
+            int(st.session_state.get("mcap_filter_mode", "Any") != "Any"),
+            int(st.session_state.get("price_filter_mode", "Any") != "Any"),
+            int(st.session_state.get("div_filter_mode", "Any") != "Any"),
+            int(relative_value_available and st.session_state.get("relvol_filter_mode", "Any") != "Any"),
+            int(momentum_available and st.session_state.get("momentum_filter_mode", "Any") != "Any"),
+            int(bool(st.session_state.get("apply_value_min", False))),
+            int(bool(st.session_state.get("apply_pbr_max", False))),
+            int(bool(st.session_state.get("apply_reserve_ratio_min", False))),
+            int(bool(st.session_state.get("apply_roe_min", False))),
+            int(bool(st.session_state.get("apply_eps_positive", False))),
+            int(bool(st.session_state.get("above_200ma", False))),
+            int(bool(st.session_state.get("apply_eps_cagr_5y", False))),
+            int(bool(st.session_state.get("apply_eps_yoy_q", False))),
+            int(bool(st.session_state.get("apply_near_high", False))),
+        ]
+    )
+
+header_cols = st.columns([4, 1])
+with header_cols[0]:
+    st.caption(f"Active filters: {_active_filter_count_from_state()}개")
+with header_cols[1]:
+    if st.button("초기화", key="reset_all_filters"):
+        _reset_all_filters()
+        _safe_rerun()
+
 descriptive_tab, fundamental_tab, technical_tab = st.tabs(["Descriptive", "Fundamental", "Technical"])
 
 with descriptive_tab:
-    ticker_input = st.text_input("티커 직접 입력", help="콤마(,) 또는 공백으로 여러 티커를 입력하세요.", key="ticker_input")
+    st.markdown("#### 시장")
+    mkt_cols = st.columns(4)
+    with mkt_cols[0]:
+        ticker_input = st.text_input("티커", help="콤마(,) 또는 공백으로 여러 티커를 입력하세요.", key="ticker_input")
+    with mkt_cols[1]:
+        mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), key="mkt")
 
     raw_tickers = [token.strip().upper() for token in re.split(r"[\s,]+", ticker_input or "") if token.strip()]
     ticker_list = list(dict.fromkeys(raw_tickers))
 
-    mkt = st.multiselect("시장", sorted(base["market"].dropna().unique().tolist()), key="mkt")
+    st.markdown("#### 시가총액")
+    mcap_cols = st.columns([1, 1, 1, 1, 1])
+    with mcap_cols[0]:
+        mcap_filter_mode = st.selectbox("시총", list(MCAP_MODES), key="mcap_filter_mode")
+    with mcap_cols[1]:
+        mcap_bucket = st.selectbox(
+            "시총 구간",
+            list(MCAP_BUCKETS.keys()),
+            key="mcap_bucket",
+            disabled=mcap_filter_mode != "구간 선택",
+        )
+    with mcap_cols[2]:
+        mcap_min_custom = st.number_input(
+            "최소",
+            min_value=0.0,
+            step=100_000_000.0,
+            key="mcap_min_custom",
+            disabled=mcap_filter_mode != "직접 입력",
+            help="단위: 원",
+        )
+    with mcap_cols[3]:
+        mcap_max_custom = st.number_input(
+            "최대",
+            min_value=0.0,
+            step=100_000_000.0,
+            key="mcap_max_custom",
+            disabled=mcap_filter_mode != "직접 입력",
+            help="단위: 원",
+        )
 
-    mcap_filter_mode, mcap_bucket, mcap_min_custom, mcap_max_custom = render_range_filter(
-        label="시가총액 필터",
-        mode_key="mcap_filter_mode",
-        bucket_key="mcap_bucket",
-        min_key="mcap_min_custom",
-        max_key="mcap_max_custom",
-        modes=MCAP_MODES,
-        buckets=MCAP_BUCKETS,
-        bucket_label="시가총액 구간",
-        min_label="최소 시총(원)",
-        max_label="최대 시총(원)",
-        min_value=0.0,
-        step=100_000_000.0,
-    )
+    st.markdown("#### 가격")
+    price_cols = st.columns([1, 1, 1, 1, 1])
+    with price_cols[0]:
+        price_filter_mode = st.selectbox("가격", list(PRICE_MODES), key="price_filter_mode")
+    with price_cols[1]:
+        price_bucket = st.selectbox(
+            "가격 구간",
+            list(PRICE_BUCKETS.keys()),
+            key="price_bucket",
+            disabled=price_filter_mode != "구간 선택",
+        )
+    with price_cols[2]:
+        price_min_custom = st.number_input(
+            "최소",
+            min_value=0.0,
+            step=100.0,
+            key="price_min_custom",
+            disabled=price_filter_mode != "직접 입력",
+            help="단위: 원",
+        )
+    with price_cols[3]:
+        price_max_custom = st.number_input(
+            "최대",
+            min_value=0.0,
+            step=100.0,
+            key="price_max_custom",
+            disabled=price_filter_mode != "직접 입력",
+            help="단위: 원",
+        )
 
-    price_filter_mode, price_bucket, price_min_custom, price_max_custom = render_range_filter(
-        label="가격 필터",
-        mode_key="price_filter_mode",
-        bucket_key="price_bucket",
-        min_key="price_min_custom",
-        max_key="price_max_custom",
-        modes=PRICE_MODES,
-        buckets=PRICE_BUCKETS,
-        bucket_label="가격 구간",
-        min_label="최소 가격(원)",
-        max_label="최대 가격(원)",
-        min_value=0.0,
-        step=100.0,
-    )
+    st.markdown("#### 배당")
+    div_cols = st.columns([1, 1, 1, 1, 1])
+    with div_cols[0]:
+        div_filter_mode = st.selectbox("배당", list(DIV_MODES), key="div_filter_mode")
+    with div_cols[1]:
+        div_bucket = st.selectbox(
+            "배당 구간",
+            list(DIV_BUCKETS.keys()),
+            key="div_bucket",
+            disabled=div_filter_mode != "구간 선택",
+        )
+    with div_cols[2]:
+        div_min_custom = st.number_input(
+            "최소",
+            min_value=0.0,
+            step=0.1,
+            key="div_min_custom",
+            disabled=div_filter_mode != "직접 입력",
+            help="단위: %",
+        )
+    with div_cols[3]:
+        div_max_custom = st.number_input(
+            "최대",
+            min_value=0.0,
+            step=0.1,
+            key="div_max_custom",
+            disabled=div_filter_mode != "직접 입력",
+            help="단위: %",
+        )
 
-    div_filter_mode, div_bucket, div_min_custom, div_max_custom = render_range_filter(
-        label="배당수익률 필터",
-        mode_key="div_filter_mode",
-        bucket_key="div_bucket",
-        min_key="div_min_custom",
-        max_key="div_max_custom",
-        modes=DIV_MODES,
-        buckets=DIV_BUCKETS,
-        bucket_label="배당수익률 구간",
-        min_label="최소 배당수익률(%)",
-        max_label="최대 배당수익률(%)",
-        min_value=0.0,
-        step=0.1,
-    )
+    st.markdown("#### 거래량")
+    value_cols = st.columns(4)
+    with value_cols[0]:
+        apply_value_min = st.checkbox("20D 거래대금", key="apply_value_min", disabled=not avg_value_available)
+    with value_cols[1]:
+        value_min = st.number_input(
+            "최소",
+            min_value=0.0,
+            step=100_000_000.0,
+            key="value_min",
+            disabled=(not avg_value_available) or (not apply_value_min),
+            help="단위: 원",
+        )
+    if not avg_value_available:
+        st.session_state.apply_value_min = False
+        st.info("평균 거래대금 데이터가 없어 해당 필터를 비활성화했습니다.")
 
-    relvol_filter_mode, relvol_bucket, relvol_min_custom, relvol_max_custom = render_range_filter(
-        label="상대 거래대금(relative_value) 필터",
-        mode_key="relvol_filter_mode",
-        bucket_key="relvol_bucket",
-        min_key="relvol_min_custom",
-        max_key="relvol_max_custom",
-        modes=RELVOL_MODES,
-        buckets=RELVOL_BUCKETS,
-        bucket_label="상대 거래대금 구간",
-        min_label="최소 상대 거래대금(x)",
-        max_label="최대 상대 거래대금(x)",
-        min_value=0.0,
-        step=0.1,
-        disabled=not relative_value_available,
-    )
+    st.markdown("#### 상대강도")
+    rel_cols = st.columns([1, 1, 1, 1, 1])
+    with rel_cols[0]:
+        relvol_filter_mode = st.selectbox(
+            "상대거래대금",
+            list(RELVOL_MODES),
+            key="relvol_filter_mode",
+            disabled=not relative_value_available,
+            help="relative_value 배수",
+        )
+    with rel_cols[1]:
+        relvol_bucket = st.selectbox(
+            "거래강도 구간",
+            list(RELVOL_BUCKETS.keys()),
+            key="relvol_bucket",
+            disabled=(not relative_value_available) or (relvol_filter_mode != "구간 선택"),
+        )
+    with rel_cols[2]:
+        relvol_min_custom = st.number_input(
+            "최소",
+            min_value=0.0,
+            step=0.1,
+            key="relvol_min_custom",
+            disabled=(not relative_value_available) or (relvol_filter_mode != "직접 입력"),
+            help="단위: x",
+        )
+    with rel_cols[3]:
+        relvol_max_custom = st.number_input(
+            "최대",
+            min_value=0.0,
+            step=0.1,
+            key="relvol_max_custom",
+            disabled=(not relative_value_available) or (relvol_filter_mode != "직접 입력"),
+            help="단위: x",
+        )
     if not relative_value_available:
         st.session_state.relvol_filter_mode = "Any"
         relvol_filter_mode = "Any"
         st.info("relative_value 데이터가 없어 해당 필터를 비활성화했습니다.")
 
-    momentum_metric = st.selectbox(
-        "모멘텀 기준",
-        list(MOMENTUM_METRICS.keys()),
-        key="momentum_metric",
-        format_func=lambda key: MOMENTUM_METRICS.get(key, key),
-        disabled=not momentum_available,
-    )
-    momentum_filter_mode = st.selectbox(
-        "모멘텀 필터",
-        list(MOMENTUM_MODES),
-        key="momentum_filter_mode",
-        disabled=not momentum_available,
-    )
-    momentum_bucket = st.selectbox(
-        "모멘텀 구간",
-        list(MOMENTUM_BUCKETS.keys()),
-        key="momentum_bucket",
-        disabled=(not momentum_available) or (momentum_filter_mode != "구간 선택"),
-    )
-    momentum_min_custom = st.number_input(
-        "최소 모멘텀",
-        step=0.01,
-        format="%.2f",
-        key="momentum_min_custom",
-        disabled=(not momentum_available) or (momentum_filter_mode != "직접 입력"),
-    )
-    momentum_max_custom = st.number_input(
-        "최대 모멘텀",
-        step=0.01,
-        format="%.2f",
-        key="momentum_max_custom",
-        disabled=(not momentum_available) or (momentum_filter_mode != "직접 입력"),
-    )
+    momentum_cols = st.columns([1, 1, 1, 1, 1])
+    with momentum_cols[0]:
+        momentum_metric = st.selectbox(
+            "강도기준",
+            list(MOMENTUM_METRICS.keys()),
+            key="momentum_metric",
+            format_func=lambda key: MOMENTUM_METRICS.get(key, key),
+            disabled=not momentum_available,
+        )
+    with momentum_cols[1]:
+        momentum_filter_mode = st.selectbox(
+            "강도필터",
+            list(MOMENTUM_MODES),
+            key="momentum_filter_mode",
+            disabled=not momentum_available,
+        )
+    with momentum_cols[2]:
+        momentum_bucket = st.selectbox(
+            "강도구간",
+            list(MOMENTUM_BUCKETS.keys()),
+            key="momentum_bucket",
+            disabled=(not momentum_available) or (momentum_filter_mode != "구간 선택"),
+        )
+    with momentum_cols[3]:
+        momentum_min_custom = st.number_input(
+            "최소",
+            step=0.01,
+            format="%.2f",
+            key="momentum_min_custom",
+            disabled=(not momentum_available) or (momentum_filter_mode != "직접 입력"),
+            help="수익률/비율 값",
+        )
+    with momentum_cols[4]:
+        momentum_max_custom = st.number_input(
+            "최대",
+            step=0.01,
+            format="%.2f",
+            key="momentum_max_custom",
+            disabled=(not momentum_available) or (momentum_filter_mode != "직접 입력"),
+            help="수익률/비율 값",
+        )
     if momentum_metric not in available_momentum_metrics and available_momentum_metrics:
         st.session_state.momentum_metric = available_momentum_metrics[0]
         momentum_metric = st.session_state.momentum_metric
     if not momentum_available:
         st.session_state.momentum_filter_mode = "Any"
         st.info("모멘텀 데이터가 없어 해당 필터를 비활성화했습니다.")
-
-    apply_value_min = st.checkbox("최소 평균 거래대금(20D) 적용", key="apply_value_min", disabled=not avg_value_available)
-    value_min = st.number_input(
-        "최소 평균 거래대금(원)",
-        min_value=0.0,
-        step=100_000_000.0,
-        key="value_min",
-        disabled=(not avg_value_available) or (not apply_value_min),
-    )
-    if not avg_value_available:
-        st.session_state.apply_value_min = False
-        st.info("평균 거래대금 데이터가 없어 해당 필터를 비활성화했습니다.")
 
 with fundamental_tab:
     apply_pbr_max = st.checkbox("최대 PBR 적용", key="apply_pbr_max")
@@ -744,28 +814,6 @@ with technical_tab:
         key="near_high_min",
     )
 
-
-active_filter_count = sum(
-    [
-        int(bool(ticker_list)),
-        int(bool(mkt)),
-        int(mcap_filter_mode != "Any"),
-        int(price_filter_mode != "Any"),
-        int(div_filter_mode != "Any"),
-        int(relvol_filter_mode != "Any"),
-        int(momentum_available and momentum_filter_mode != "Any"),
-        int(apply_value_min),
-        int(apply_pbr_max),
-        int(apply_reserve_ratio_min),
-        int(apply_roe_min),
-        int(apply_eps_positive),
-        int(above_200ma),
-        int(apply_eps_cagr_5y),
-        int(apply_eps_yoy_q),
-        int(apply_near_high),
-    ]
-)
-st.caption(f"적용 중인 조건 수: {active_filter_count}개")
 
 filtered = base.copy()
 missing_tickers: list[str] = []
@@ -930,6 +978,31 @@ if ticker_list:
 
 if filtered.empty:
     st.warning("조건을 만족하는 종목이 없습니다. Growth 조건(EPS CAGR/EPS YoY) 임계값을 낮추거나 체크를 해제해 보세요.")
+
+condition_summaries: list[str] = []
+if ticker_list:
+    condition_summaries.append(f"티커 {len(ticker_list)}")
+if mkt:
+    condition_summaries.append(f"시장 {', '.join(mkt)}")
+if mcap_filter_mode != "Any":
+    condition_summaries.append(f"시총 {_format_range_summary(mcap_filter_mode, mcap_bucket, mcap_min_custom, mcap_max_custom)}")
+if price_filter_mode != "Any":
+    condition_summaries.append(f"가격 {_format_range_summary(price_filter_mode, price_bucket, price_min_custom, price_max_custom)}")
+if div_filter_mode != "Any":
+    condition_summaries.append(f"배당 {_format_range_summary(div_filter_mode, div_bucket, div_min_custom, div_max_custom)}")
+if apply_value_min:
+    condition_summaries.append(f"20D 거래대금 ≥ {value_min:,.0f}")
+if relative_value_available and relvol_filter_mode != "Any":
+    condition_summaries.append(
+        f"상대거래대금 {_format_range_summary(relvol_filter_mode, relvol_bucket, relvol_min_custom, relvol_max_custom)}"
+    )
+if momentum_available and momentum_filter_mode != "Any":
+    condition_summaries.append(
+        f"{MOMENTUM_METRICS.get(momentum_metric, momentum_metric)} {_format_range_summary(momentum_filter_mode, momentum_bucket, momentum_min_custom, momentum_max_custom)}"
+    )
+
+if condition_summaries:
+    st.caption("현재 조건: " + " • ".join(condition_summaries))
 
 show_cols = [
     "ticker", "name", "market", "close", "mcap", "avg_value_20d", "current_value", "relative_value", "pbr", "reserve_ratio", "per", "div", "dps",
