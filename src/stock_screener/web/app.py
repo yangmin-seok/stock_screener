@@ -56,9 +56,6 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("apply_roe_min", "bool", False),
     FilterSpec("roe_min", "float", 0.1),
     FilterSpec("apply_eps_positive", "bool", False),
-    FilterSpec("dividend_filter_option", "str", "any"),
-    FilterSpec("dividend_min_preset", "float", 3.0),
-    FilterSpec("dividend_min_custom", "float", 0.0),
     FilterSpec("apply_reserve_ratio_min", "bool", False),
     FilterSpec("reserve_ratio_min", "float", 500.0),
     FilterSpec("apply_eps_cagr_5y", "bool", False),
@@ -354,14 +351,6 @@ if st.session_state.get("query_parse_errors"):
         + ", ".join(st.session_state.query_parse_errors)
     )
 
-# Backward compatibility: migrate legacy session/query keys when older links/state are loaded.
-if "mcap_mode" in st.session_state and "mcap_filter_mode" not in st.session_state:
-    st.session_state.mcap_filter_mode = st.session_state.get("mcap_mode", "Any")
-if "price_mode" in st.session_state and "price_filter_mode" not in st.session_state:
-    st.session_state.price_filter_mode = st.session_state.get("price_mode", "Any")
-if "div_mode" in st.session_state and "div_filter_mode" not in st.session_state:
-    st.session_state.div_filter_mode = st.session_state.get("div_mode", "Any")
-
 if st.session_state.get("mcap_filter_mode") not in MCAP_MODES:
     st.session_state.mcap_filter_mode = "Any"
 if st.session_state.get("price_filter_mode") not in PRICE_MODES:
@@ -460,9 +449,6 @@ st.markdown("### 조건 선택")
 st.caption("조건은 Any + 임계치 방식으로 설정되며, 계산 불가한 항목은 자동 비활성화됩니다.")
 
 avg_value_available = "avg_value_20d" in base.columns and base["avg_value_20d"].notna().any()
-current_value_available = "current_value" in base.columns and base["current_value"].notna().any()
-relative_value_available = "relative_value" in base.columns and base["relative_value"].notna().any()
-dividend_available = "div" in base.columns
 
 descriptive_tab, fundamental_tab, technical_tab = st.tabs(["Descriptive", "Fundamental", "Technical"])
 
@@ -525,186 +511,19 @@ with descriptive_tab:
         disabled=div_filter_mode != "직접 입력",
     )
 
-    price_filter_mode = st.selectbox("가격 필터", ["Any", "구간 선택", "직접 입력"], key="price_filter_mode")
-    price_bucket = st.selectbox("가격 구간", list(PRICE_BUCKETS.keys()), key="price_bucket", disabled=price_filter_mode != "구간 선택")
-    price_min_custom = st.number_input(
-        "최소 가격(원)",
-        min_value=0.0,
-        step=100.0,
-        key="price_min_custom",
-        disabled=price_filter_mode != "직접 입력",
-    )
-    price_max_custom = st.number_input(
-        "최대 가격(원)",
-        min_value=0.0,
-        step=100.0,
-        key="price_max_custom",
-        disabled=price_filter_mode != "직접 입력",
-    )
-
-    div_filter_mode = st.selectbox("배당수익률 필터", ["Any", "구간 선택", "직접 입력"], key="div_filter_mode")
-    div_bucket = st.selectbox("배당수익률 구간", list(DIV_BUCKETS.keys()), key="div_bucket", disabled=div_filter_mode != "구간 선택")
-    div_min_custom = st.number_input(
-        "최소 배당수익률(%)",
-        min_value=0.0,
-        step=0.1,
-        key="div_min_custom",
-        disabled=div_filter_mode != "직접 입력",
-    )
-    div_max_custom = st.number_input(
-        "최대 배당수익률(%)",
-        min_value=0.0,
-        step=0.1,
-        key="div_max_custom",
-        disabled=div_filter_mode != "직접 입력",
-    )
-    mcap_max = st.number_input(
-        "최대 시총(원)",
+    apply_value_min = st.checkbox("최소 평균 거래대금(20D) 적용", key="apply_value_min", disabled=not avg_value_available)
+    value_min = st.number_input(
+        "최소 평균 거래대금(원)",
         min_value=0.0,
         step=100_000_000.0,
-        disabled=not custom_mode,
-        key="mcap_max",
+        key="value_min",
+        disabled=(not avg_value_available) or (not apply_value_min),
     )
-
-    price_mode = st.selectbox(
-        "가격 필터",
-        options=list(PRICE_MODES.keys()),
-        format_func=lambda mode: PRICE_MODES[mode],
-        key="price_mode",
-    )
-
-    price_bucket = st.selectbox(
-        "가격 구간",
-        options=[bucket["key"] for bucket in PRICE_BUCKETS],
-        format_func=lambda key: PRICE_BUCKET_LABEL_MAP[key],
-        disabled=price_mode != "bucket",
-        key="price_bucket",
-    )
-
-    custom_price_mode = price_mode == "custom"
-    price_min = st.number_input(
-        "최소 가격(원)",
-        min_value=0.0,
-        step=100.0,
-        disabled=not custom_price_mode,
-        key="price_min",
-    )
-    price_max = st.number_input(
-        "최대 가격(원)",
-        min_value=0.0,
-        step=100.0,
-        disabled=not custom_price_mode,
-        key="price_max",
-    )
-
-    avg_value_mode = st.selectbox(
-        "평균 거래대금(20D)",
-        options=list(VALUE_FILTER_MODES.keys()),
-        format_func=lambda mode: VALUE_FILTER_MODES[mode],
-        key="avg_value_mode",
-        disabled=not avg_value_available,
-    )
-    avg_threshold_index = next((
-        idx for idx, (_, threshold) in enumerate(VALUE_THRESHOLD_OPTIONS) if threshold == st.session_state.avg_value_min
-    ), len(VALUE_THRESHOLD_OPTIONS) - 1)
-    avg_value_min = st.selectbox(
-        "평균 거래대금 임계치",
-        options=list(range(len(VALUE_THRESHOLD_OPTIONS))),
-        format_func=lambda idx: VALUE_THRESHOLD_OPTIONS[idx][0],
-        index=avg_threshold_index,
-        disabled=(not avg_value_available) or avg_value_mode == "any",
-        key="avg_value_min_index",
-    )
-    avg_value_min = VALUE_THRESHOLD_OPTIONS[avg_value_min][1]
-    st.session_state.avg_value_min = avg_value_min
     if not avg_value_available:
-        st.session_state.avg_value_mode = "any"
+        st.session_state.apply_value_min = False
         st.info("평균 거래대금 데이터가 없어 해당 필터를 비활성화했습니다.")
 
-    current_value_mode = st.selectbox(
-        "현재 거래대금",
-        options=list(VALUE_FILTER_MODES.keys()),
-        format_func=lambda mode: VALUE_FILTER_MODES[mode],
-        key="current_value_mode",
-        disabled=not current_value_available,
-    )
-    current_threshold_index = next((
-        idx for idx, (_, threshold) in enumerate(VALUE_THRESHOLD_OPTIONS) if threshold == st.session_state.current_value_min
-    ), 0)
-    current_value_min = st.selectbox(
-        "현재 거래대금 임계치",
-        options=list(range(len(VALUE_THRESHOLD_OPTIONS))),
-        format_func=lambda idx: VALUE_THRESHOLD_OPTIONS[idx][0],
-        index=current_threshold_index,
-        disabled=(not current_value_available) or current_value_mode == "any",
-        key="current_value_min_index",
-    )
-    current_value_min = VALUE_THRESHOLD_OPTIONS[current_value_min][1]
-    st.session_state.current_value_min = current_value_min
-    if not current_value_available:
-        st.session_state.current_value_mode = "any"
-        st.info("현재 거래대금 데이터가 안정적으로 확보되지 않아 필터를 비활성화했습니다.")
-
-    relative_value_mode = st.selectbox(
-        "상대 거래대금 (현재/20D평균)",
-        options=list(VALUE_FILTER_MODES.keys()),
-        format_func=lambda mode: VALUE_FILTER_MODES[mode],
-        key="relative_value_mode",
-        disabled=not relative_value_available,
-    )
-    relative_threshold_index = next((
-        idx for idx, (_, threshold) in enumerate(RELATIVE_THRESHOLD_OPTIONS) if threshold == st.session_state.relative_value_min
-    ), 1)
-    relative_value_min = st.selectbox(
-        "상대 거래대금 임계치",
-        options=list(range(len(RELATIVE_THRESHOLD_OPTIONS))),
-        format_func=lambda idx: RELATIVE_THRESHOLD_OPTIONS[idx][0],
-        index=relative_threshold_index,
-        disabled=(not relative_value_available) or relative_value_mode == "any",
-        key="relative_value_min_index",
-    )
-    relative_value_min = RELATIVE_THRESHOLD_OPTIONS[relative_value_min][1]
-    st.session_state.relative_value_min = relative_value_min
-    if not relative_value_available:
-        st.session_state.relative_value_mode = "any"
-        st.info("상대 거래대금 계산이 불가하여 필터를 비활성화했습니다.")
-
 with fundamental_tab:
-    dividend_filter_option = st.selectbox(
-        "Dividend Yield (%)",
-        options=list(DIVIDEND_FILTER_OPTIONS.keys()),
-        format_func=lambda option: DIVIDEND_FILTER_OPTIONS[option],
-        key="dividend_filter_option",
-        disabled=not dividend_available,
-    )
-
-    dividend_min_preset = st.selectbox(
-        "최소 Dividend Yield 구간 (%)",
-        options=DIVIDEND_MIN_PRESET_OPTIONS,
-        format_func=lambda value: f"{value:.1f}% 이상",
-        index=DIVIDEND_MIN_PRESET_OPTIONS.index(st.session_state.dividend_min_preset)
-        if st.session_state.dividend_min_preset in DIVIDEND_MIN_PRESET_OPTIONS
-        else 2,
-        disabled=(not dividend_available) or dividend_filter_option != "min_preset",
-        key="dividend_min_preset",
-    )
-
-    dividend_min_custom = st.number_input(
-        "Custom 최소 Dividend Yield (%)",
-        min_value=0.0,
-        step=0.1,
-        format="%.1f",
-        disabled=(not dividend_available) or dividend_filter_option != "min_custom",
-        key="dividend_min_custom",
-    )
-
-    if DIVIDEND_MISSING_POLICY == "fill_zero":
-        st.caption("배당 결측 데이터는 필터 계산 시 **0% (무배당)** 으로 고정 처리합니다.")
-
-    if not dividend_available:
-        st.session_state.dividend_filter_option = "any"
-        st.info("배당수익률(%) 데이터가 없어 관련 필터를 비활성화했습니다.")
-
     apply_pbr_max = st.checkbox("최대 PBR 적용", key="apply_pbr_max")
     pbr_max = st.number_input("최대 PBR", min_value=0.0, step=0.1, disabled=not apply_pbr_max, key="pbr_max")
 
@@ -854,25 +673,23 @@ for spec in FILTER_SPECS:
     if serialized is not None:
         query_filter_state[spec.name] = serialized
 
-if mcap_mode != "custom":
-    query_filter_state.pop("mcap_min", None)
-    query_filter_state.pop("mcap_max", None)
-if mcap_mode != "bucket":
+if mcap_filter_mode != "직접 입력":
+    query_filter_state.pop("mcap_min_custom", None)
+    query_filter_state.pop("mcap_max_custom", None)
+if mcap_filter_mode != "구간 선택":
     query_filter_state.pop("mcap_bucket", None)
 
-if mcap_mode == "custom":
-    query_filter_state["mcap_min"] = str(mcap_min)
-    query_filter_state["mcap_max"] = str(mcap_max)
-
-if price_mode != "custom":
-    query_filter_state.pop("price_min", None)
-    query_filter_state.pop("price_max", None)
-if price_mode != "bucket":
+if price_filter_mode != "직접 입력":
+    query_filter_state.pop("price_min_custom", None)
+    query_filter_state.pop("price_max_custom", None)
+if price_filter_mode != "구간 선택":
     query_filter_state.pop("price_bucket", None)
 
-if price_mode == "custom":
-    query_filter_state["price_min"] = str(price_min)
-    query_filter_state["price_max"] = str(price_max)
+if div_filter_mode != "직접 입력":
+    query_filter_state.pop("div_min_custom", None)
+    query_filter_state.pop("div_max_custom", None)
+if div_filter_mode != "구간 선택":
+    query_filter_state.pop("div_bucket", None)
 
 _set_query_params(query_filter_state)
 
