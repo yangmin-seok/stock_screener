@@ -308,36 +308,44 @@ def _render_active_job_panel() -> None:
 query_params = _get_query_params()
 if "query_params_restored" not in st.session_state:
     st.session_state.query_parse_errors = []
+
+    # Backward compatibility: migrate legacy query keys before restoring filter specs.
+    legacy_query_key_map = {
+        "mcap_mode": "mcap_filter_mode",
+        "price_mode": "price_filter_mode",
+        "div_mode": "div_filter_mode",
+    }
+    for legacy_key, new_key in legacy_query_key_map.items():
+        if new_key not in query_params and legacy_key in query_params:
+            query_params[new_key] = query_params[legacy_key]
+
     for spec in FILTER_SPECS:
         try:
             st.session_state[spec.name] = _parse_query_filter_value(spec, query_params)
         except ValueError:
             st.session_state[spec.name] = spec.default
             st.session_state.query_parse_errors.append(spec.name)
-    if st.session_state.get("mcap_mode") not in MCAP_MODES:
-        st.session_state.mcap_mode = "any"
-        st.session_state.query_parse_errors.append("mcap_mode")
-    if st.session_state.get("mcap_bucket") not in MCAP_BUCKET_MAP:
-        st.session_state.mcap_bucket = "any"
+
+    if st.session_state.get("mcap_filter_mode") not in MCAP_MODES:
+        st.session_state.mcap_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("mcap_filter_mode")
+    if st.session_state.get("price_filter_mode") not in PRICE_MODES:
+        st.session_state.price_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("price_filter_mode")
+    if st.session_state.get("div_filter_mode") not in DIV_MODES:
+        st.session_state.div_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("div_filter_mode")
+
+    if st.session_state.get("mcap_bucket") not in MCAP_BUCKETS:
+        st.session_state.mcap_bucket = "전체"
         st.session_state.query_parse_errors.append("mcap_bucket")
-    if st.session_state.get("price_mode") not in PRICE_MODES:
-        st.session_state.price_mode = "any"
-        st.session_state.query_parse_errors.append("price_mode")
-    if st.session_state.get("avg_value_mode") not in VALUE_FILTER_MODES:
-        st.session_state.avg_value_mode = "min"
-        st.session_state.query_parse_errors.append("avg_value_mode")
-    if st.session_state.get("current_value_mode") not in VALUE_FILTER_MODES:
-        st.session_state.current_value_mode = "any"
-        st.session_state.query_parse_errors.append("current_value_mode")
-    if st.session_state.get("relative_value_mode") not in VALUE_FILTER_MODES:
-        st.session_state.relative_value_mode = "any"
-        st.session_state.query_parse_errors.append("relative_value_mode")
-    if st.session_state.get("dividend_filter_option") not in DIVIDEND_FILTER_OPTIONS:
-        st.session_state.dividend_filter_option = "any"
-        st.session_state.query_parse_errors.append("dividend_filter_option")
-    if st.session_state.get("price_bucket") not in PRICE_BUCKET_MAP:
-        st.session_state.price_bucket = "any"
+    if st.session_state.get("price_bucket") not in PRICE_BUCKETS:
+        st.session_state.price_bucket = "전체"
         st.session_state.query_parse_errors.append("price_bucket")
+    if st.session_state.get("div_bucket") not in DIV_BUCKETS:
+        st.session_state.div_bucket = "전체"
+        st.session_state.query_parse_errors.append("div_bucket")
+
     st.session_state.query_params_restored = True
 
 if st.session_state.get("query_parse_errors"):
