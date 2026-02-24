@@ -11,9 +11,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run daily batch for stock screener")
     parser.add_argument("--db-path", default="data/screener.db")
     parser.add_argument("--asof-date", default=None)
-    parser.add_argument("--lookback-days", type=int, default=400)
+    parser.add_argument("--lookback-days", type=int, default=3650)
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
     parser.add_argument("--snapshot-only", action="store_true", help="Rebuild snapshot from cached DB data only")
+    parser.add_argument("--initial-backfill", action="store_true", help="Run long-window initial backfill")
     parser.add_argument("--update-reserve-only", action="store_true", help="Update reserve ratio only (Naver crawl)")
     parser.add_argument(
         "--rebuild-snapshot",
@@ -46,7 +47,7 @@ def main() -> None:
         result = pipeline.rebuild_snapshot_only(asof_date=args.asof_date, lookback_days=args.lookback_days)
         print(result)
     else:
-        result = pipeline.run(asof_date=args.asof_date, lookback_days=args.lookback_days)
+        result = pipeline.run(asof_date=args.asof_date, lookback_days=args.lookback_days, initial_backfill=args.initial_backfill)
         print(result)
 
 

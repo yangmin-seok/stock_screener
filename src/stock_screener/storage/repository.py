@@ -178,7 +178,7 @@ class Repository:
                 "per", "pbr", "div", "dps", "eps", "bps", "reserve_ratio", "fiscal_period", "period_type", "reported_date", "consolidation_type", "financial_source", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
                 "dist_sma20", "dist_sma50", "dist_sma200", "high_52w", "low_52w", "pos_52w", "near_52w_high_ratio",
                 "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_5y", "eps_yoy_q", "eps_growth_ttm", "sales_growth_qoq",
-                "eps_cagr_5y_window_years", "eps_cagr_5y_asof", "eps_cagr_5y_sample_count", "eps_yoy_q_window_years", "eps_yoy_q_asof", "eps_yoy_q_sample_count", "calc_version",
+                "eps_cagr_5y_window_years", "eps_cagr_5y_asof", "eps_cagr_5y_sample_count", "eps_yoy_q_window_years", "eps_yoy_q_asof", "eps_yoy_q_sample_count", "has_price_5y", "has_price_10y", "calc_version",
             ]
             rows = self._to_sql_records(frame, cols)
             placeholders = ", ".join(["?"] * len(cols))
@@ -189,7 +189,7 @@ class Repository:
                     per, pbr, div, dps, eps, bps, reserve_ratio, fiscal_period, period_type, reported_date, consolidation_type, financial_source, roe_proxy, eps_positive, sma20, sma50, sma200,
                     dist_sma20, dist_sma50, dist_sma200, high_52w, low_52w, pos_52w, near_52w_high_ratio,
                     vol_20d, ret_1w, ret_1m, ret_3m, ret_6m, ret_1y, eps_cagr_5y, eps_yoy_q, eps_growth_ttm, sales_growth_qoq,
-                    eps_cagr_5y_window_years, eps_cagr_5y_asof, eps_cagr_5y_sample_count, eps_yoy_q_window_years, eps_yoy_q_asof, eps_yoy_q_sample_count, calc_version
+                    eps_cagr_5y_window_years, eps_cagr_5y_asof, eps_cagr_5y_sample_count, eps_yoy_q_window_years, eps_yoy_q_asof, eps_yoy_q_sample_count, has_price_5y, has_price_10y, calc_version
                 ) VALUES ({placeholders})
                 """,
                 rows,
@@ -279,6 +279,11 @@ class Repository:
             "reported_date": row[2],
         }
 
+    def get_latest_fundamental_date(self) -> str | None:
+        with db_session(self.db_path) as conn:
+            row = conn.execute("SELECT MAX(date) AS d FROM fundamental_daily").fetchone()
+        return row[0] if row and row[0] else None
+
     def get_latest_price_date(self) -> str | None:
         with db_session(self.db_path) as conn:
             row = conn.execute("SELECT MAX(date) AS d FROM prices_daily").fetchone()
@@ -293,6 +298,37 @@ class Repository:
         with db_session(self.db_path) as conn:
             rows = conn.execute("SELECT ticker FROM ticker_master WHERE active_flag = 1 ORDER BY ticker").fetchall()
         return [str(row[0]) for row in rows]
+
+
+    def get_collection_checkpoint(self, ticker: str) -> dict[str, str | None]:
+        with db_session(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT last_price_date, last_fundamental_date FROM collection_checkpoint WHERE ticker = ?",
+                (ticker,),
+            ).fetchone()
+        if not row:
+            return {"last_price_date": None, "last_fundamental_date": None}
+        return {"last_price_date": row[0], "last_fundamental_date": row[1]}
+
+    def upsert_collection_checkpoint(
+        self,
+        ticker: str,
+        *,
+        last_price_date: str | None = None,
+        last_fundamental_date: str | None = None,
+    ) -> None:
+        with db_session(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO collection_checkpoint(ticker, last_price_date, last_fundamental_date, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(ticker) DO UPDATE SET
+                    last_price_date=COALESCE(excluded.last_price_date, collection_checkpoint.last_price_date),
+                    last_fundamental_date=COALESCE(excluded.last_fundamental_date, collection_checkpoint.last_fundamental_date),
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (ticker, last_price_date, last_fundamental_date),
+            )
 
     def get_latest_snapshot_date(self) -> str | None:
         with db_session(self.db_path) as conn:

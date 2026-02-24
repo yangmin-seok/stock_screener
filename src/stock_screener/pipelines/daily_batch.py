@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 import logging
 from pathlib import Path
+import time
 
 import pandas as pd
 
@@ -77,7 +78,7 @@ class DailyBatchPipeline:
 
         asof_ts = pd.Timestamp(asof)
         dates.add(ts.iloc[-1].date())
-        for years in range(1, 6):
+        for years in range(1, 11):
             target = asof_ts - pd.DateOffset(years=years)
             candidates = ts[ts <= target]
             if not candidates.empty:
@@ -92,46 +93,120 @@ class DailyBatchPipeline:
             logger.warning("No financial provider rows for date=%s", dt)
         return merged
 
-    def run(self, asof_date: str | None = None, lookback_days: int = 400) -> BatchResult:
+    def _safe_collect(self, fn, *args, label: str, max_attempts: int = 4, **kwargs):
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                sleep_s = min(10.0, 0.8 * (2 ** (attempt - 1)))
+                logger.warning("%s failed (%s/%s): %s", label, attempt, max_attempts, exc)
+                if attempt < max_attempts:
+                    time.sleep(sleep_s)
+        raise RuntimeError(f"{label} failed after retries: {last_error}") from last_error
+
+    def run(self, asof_date: str | None = None, lookback_days: int = 3650, initial_backfill: bool = False) -> BatchResult:
         dt = pd.to_datetime(asof_date).date() if asof_date else self.collector.recent_business_day()
         asof_str = dt.strftime("%Y-%m-%d")
-        logger.info("Starting daily batch: asof=%s, lookback_days=%s", asof_str, lookback_days)
+        logger.info(
+            "Starting daily batch: asof=%s, lookback_days=%s, initial_backfill=%s",
+            asof_str,
+            lookback_days,
+            initial_backfill,
+        )
 
         tickers = self.collector.tickers()
         ticker_count = self.repo.upsert_tickers(tickers)
         logger.info("Tickers upserted: %s", ticker_count)
 
-        price_from_dt = dt - timedelta(days=lookback_days * 2)
-        logger.info("Price/cap fetch window: %s ~ %s", price_from_dt, dt)
-
+        default_price_from_dt = dt - timedelta(days=lookback_days * 2)
         price_rows = 0
+        price_failures = 0
         for idx, ticker in enumerate(tickers["ticker"], start=1):
-            ohlcv = self.collector.ohlcv(price_from_dt, dt, ticker)
-            price_rows += self.repo.upsert_prices(ohlcv)
+            if initial_backfill:
+                from_dt = default_price_from_dt
+            else:
+                checkpoint = self.repo.get_collection_checkpoint(ticker)
+                last_price_date = checkpoint.get("last_price_date")
+                if last_price_date:
+                    from_dt = pd.to_datetime(last_price_date).date() + timedelta(days=1)
+                else:
+                    from_dt = dt - timedelta(days=45)
+            if from_dt > dt:
+                continue
+            try:
+                ohlcv = self._safe_collect(
+                    self.collector.ohlcv,
+                    from_dt,
+                    dt,
+                    ticker,
+                    label=f"ohlcv:{ticker}",
+                )
+                upserted = self.repo.upsert_prices(ohlcv)
+                price_rows += upserted
+                if not ohlcv.empty:
+                    max_date = pd.to_datetime(ohlcv["date"]).max().strftime("%Y-%m-%d")
+                    self.repo.upsert_collection_checkpoint(ticker, last_price_date=max_date)
+            except Exception as exc:  # noqa: BLE001
+                price_failures += 1
+                logger.error("Price collection failed ticker=%s: %s", ticker, exc)
             if idx % 200 == 0 or idx == ticker_count:
-                logger.info("Price progress: %s/%s tickers, rows=%s", idx, ticker_count, price_rows)
+                logger.info(
+                    "Price progress: %s/%s tickers, rows=%s, failures=%s",
+                    idx,
+                    ticker_count,
+                    price_rows,
+                    price_failures,
+                )
 
         cap_rows = 0
-        trading_dates = self.collector.trading_dates(price_from_dt, dt)
+        cap_from_dt = default_price_from_dt if initial_backfill else pd.to_datetime(self.repo.get_latest_price_date() or asof_str).date() - timedelta(days=10)
+        trading_dates = self.collector.trading_dates(cap_from_dt, dt)
         for idx, trading_dt in enumerate(trading_dates, start=1):
-            cap_rows += self.repo.upsert_cap(self.collector.market_cap(trading_dt))
+            cap_frame = self._safe_collect(self.collector.market_cap, trading_dt, label=f"market_cap:{trading_dt}")
+            cap_rows += self.repo.upsert_cap(cap_frame)
             if idx % 30 == 0 or idx == len(trading_dates):
                 logger.info("Cap progress: %s/%s dates, rows=%s", idx, len(trading_dates), cap_rows)
 
         fund_rows = 0
-        fundamental_from_dt = dt - timedelta(days=365 * 6)
+        latest_fundamental = self.repo.get_latest_fundamental_date()
+        if initial_backfill:
+            fundamental_from_dt = dt - timedelta(days=max(lookback_days, 3650) + 365)
+        elif latest_fundamental:
+            fundamental_from_dt = pd.to_datetime(latest_fundamental).date() - timedelta(days=31)
+        else:
+            fundamental_from_dt = dt - timedelta(days=400)
+
         fundamental_trading_dates = self.collector.trading_dates(fundamental_from_dt, dt)
         fund_dates = self._fundamental_backfill_dates(dt, fundamental_trading_dates)
         logger.info("Fundamental fetch anchors: %s dates (window=%s~%s)", len(fund_dates), fundamental_from_dt, dt)
         for idx, fdt in enumerate(fund_dates, start=1):
-            fund_rows += self.repo.upsert_fundamental(self.collector.fundamental_market_metrics(fdt))
-            fund_rows += self.repo.upsert_financials(self._collect_financials(fdt), fdt.strftime("%Y-%m-%d"))
+            try:
+                fund_frame = self._safe_collect(
+                    self.collector.fundamental_market_metrics,
+                    fdt,
+                    label=f"fundamental:{fdt}",
+                )
+                financial_frame = self._safe_collect(self._collect_financials, fdt, label=f"financials:{fdt}")
+                fund_rows += self.repo.upsert_fundamental(fund_frame)
+                fund_rows += self.repo.upsert_financials(financial_frame, fdt.strftime("%Y-%m-%d"))
+                touched = set()
+                if not fund_frame.empty:
+                    touched.update(fund_frame["ticker"].astype(str).tolist())
+                if not financial_frame.empty:
+                    touched.update(financial_frame["ticker"].astype(str).tolist())
+                checkpoint_date = fdt.strftime("%Y-%m-%d")
+                for ticker in touched:
+                    self.repo.upsert_collection_checkpoint(ticker, last_fundamental_date=checkpoint_date)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Fundamental collection failed date=%s: %s", fdt, exc)
             if idx % 10 == 0 or idx == len(fund_dates):
                 logger.info("Fundamental progress: %s/%s dates, rows=%s", idx, len(fund_dates), fund_rows)
 
         price_window = self.repo.get_price_window(asof_str, window=lookback_days)
         daily = self.repo.get_daily_join(asof_str)
-        fund_hist = self.repo.get_fundamental_window(asof_str, years=6)
+        fund_hist = self.repo.get_fundamental_window(asof_str, years=11)
         snapshot = build_snapshot(price_window, daily, fund_hist, asof_str)
         snap_rows = self.repo.replace_snapshot(asof_str, snapshot)
 
@@ -154,7 +229,7 @@ class DailyBatchPipeline:
             snapshot=snap_rows,
         )
 
-    def rebuild_snapshot_only(self, asof_date: str | None = None, lookback_days: int = 400) -> BatchResult:
+    def rebuild_snapshot_only(self, asof_date: str | None = None, lookback_days: int = 3650) -> BatchResult:
         latest_price_date = self.repo.get_latest_price_date()
         latest_snapshot_date = self.repo.get_latest_snapshot_date()
 
@@ -174,7 +249,7 @@ class DailyBatchPipeline:
 
         price_window = self.repo.get_price_window(asof_str, window=lookback_days)
         daily = self.repo.get_daily_join(asof_str)
-        fund_hist = self.repo.get_fundamental_window(asof_str, years=6)
+        fund_hist = self.repo.get_fundamental_window(asof_str, years=11)
         if price_window.empty or daily.empty:
             raise ValueError(
                 f"No cached rows for asof={asof_str}. Run full collection for this date or choose an existing asof date."
