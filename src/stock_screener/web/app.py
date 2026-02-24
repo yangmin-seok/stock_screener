@@ -4,6 +4,7 @@ import re
 import multiprocessing as mp
 import queue
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,7 @@ from urllib.parse import urlencode
 
 import streamlit as st
 
-from stock_screener.pipelines.daily_batch import DailyBatchPipeline
+from stock_screener.pipelines.daily_batch import BatchCancelledError, DailyBatchPipeline
 from stock_screener.storage.db import init_db
 from stock_screener.storage.repository import Repository
 
@@ -28,6 +29,8 @@ st.caption("기본 asof = 최신 거래일(가격 데이터 기준), 해당 거�
 
 if "collect_lookback_days" not in st.session_state:
     st.session_state.collect_lookback_days = 3650
+if "incremental_job_mode" not in st.session_state:
+    st.session_state.incremental_job_mode = "single_pass_with_snapshot"
 
 
 @dataclass(frozen=True)
@@ -245,12 +248,68 @@ def _serialize_query_filter_value(spec: FilterSpec, value: Any) -> str | list[st
     return None
 
 
-def _job_worker(db_path: str, job_type: str, asof_date: str | None, lookback_days: int, result_queue: mp.Queue) -> None:
+def _job_worker(
+    db_path: str,
+    job_type: str,
+    asof_date: str | None,
+    lookback_days: int,
+    result_queue: mp.Queue,
+    run_options: dict[str, Any] | None = None,
+) -> None:
     worker_pipeline = DailyBatchPipeline(Path(db_path))
+    run_options = run_options or {}
+
+    def should_cancel() -> bool:
+        cancel_flag = run_options.get("cancel_flag_path")
+        return bool(cancel_flag) and Path(cancel_flag).exists()
+
     try:
-        if job_type == "full_refresh":
-            result = worker_pipeline.run(asof_date=None, lookback_days=lookback_days, initial_backfill=False)
-            result_queue.put({"status": "success", "job_type": job_type, "result": result.__dict__})
+        if job_type in {"full_refresh", "initial_backfill"}:
+            initial_backfill = job_type == "initial_backfill"
+            if run_options.get("chunked_snapshot_strategy"):
+                result = worker_pipeline.run(
+                    asof_date=None,
+                    lookback_days=lookback_days,
+                    initial_backfill=initial_backfill,
+                    chunk_years=2,
+                    chunks=5,
+                    rebuild_snapshot=False,
+                    should_cancel=should_cancel,
+                )
+                snap_result = worker_pipeline.rebuild_snapshot_only(
+                    asof_date=result.asof_date,
+                    lookback_days=lookback_days,
+                )
+                result_queue.put(
+                    {
+                        "status": "success",
+                        "job_type": job_type,
+                        "result": result.__dict__,
+                        "chunks_done": 5,
+                        "total_chunks": 5,
+                        "snapshot_rebuilt": True,
+                        "snapshot_rows": snap_result.snapshot,
+                    }
+                )
+                return
+
+            result = worker_pipeline.run(
+                asof_date=None,
+                lookback_days=lookback_days,
+                initial_backfill=initial_backfill,
+                should_cancel=should_cancel,
+            )
+            result_queue.put(
+                {
+                    "status": "success",
+                    "job_type": job_type,
+                    "result": result.__dict__,
+                    "chunks_done": 1,
+                    "total_chunks": 1,
+                    "snapshot_rebuilt": True,
+                    "snapshot_rows": result.snapshot,
+                }
+            )
             return
 
         if job_type in {"snapshot_refresh", "auto_snapshot_sync"}:
@@ -273,11 +332,19 @@ def _job_worker(db_path: str, job_type: str, asof_date: str | None, lookback_day
             return
 
         result_queue.put({"status": "error", "job_type": job_type, "error": f"Unknown job type: {job_type}"})
+    except BatchCancelledError as exc:
+        result_queue.put({"status": "cancelled", "job_type": job_type, "message": str(exc)})
     except Exception as exc:  # noqa: BLE001
         result_queue.put({"status": "error", "job_type": job_type, "error": str(exc)})
 
 
-def _start_background_job(job_type: str, label: str, asof_date: str | None, lookback_days: int | None = None) -> None:
+def _start_background_job(
+    job_type: str,
+    label: str,
+    asof_date: str | None,
+    lookback_days: int | None = None,
+    run_options: dict[str, Any] | None = None,
+) -> None:
     active_job = st.session_state.get("active_job")
     if active_job and active_job["process"].is_alive():
         st.warning("다른 작업이 이미 실행 중입니다. 완료되거나 취소 후 다시 시도하세요.")
@@ -285,7 +352,14 @@ def _start_background_job(job_type: str, label: str, asof_date: str | None, look
 
     result_queue: mp.Queue = mp.Queue()
     run_lookback = int(lookback_days if lookback_days is not None else st.session_state.get("collect_lookback_days", 3650))
-    process = mp.Process(target=_job_worker, args=(str(DB_PATH), job_type, asof_date, run_lookback, result_queue), daemon=True)
+    run_options = dict(run_options or {})
+    cancel_flag_path = str(DB_PATH.parent / f".cancel_{job_type}_{uuid.uuid4().hex}.flag")
+    run_options["cancel_flag_path"] = cancel_flag_path
+    process = mp.Process(
+        target=_job_worker,
+        args=(str(DB_PATH), job_type, asof_date, run_lookback, result_queue, run_options),
+        daemon=True,
+    )
     process.start()
     st.session_state.active_job = {
         "job_type": job_type,
@@ -295,6 +369,8 @@ def _start_background_job(job_type: str, label: str, asof_date: str | None, look
         "result_queue": result_queue,
         "started_at": time.time(),
         "lookback_days": run_lookback,
+        "cancel_flag_path": cancel_flag_path,
+        "cancel_requested": False,
     }
 
 
@@ -315,6 +391,10 @@ def _poll_background_job() -> None:
     except queue.Empty:
         message = {"status": "error", "job_type": active_job["job_type"], "error": "작업 결과를 읽지 못했습니다."}
 
+    cancel_flag = active_job.get("cancel_flag_path")
+    if cancel_flag and Path(cancel_flag).exists():
+        Path(cancel_flag).unlink(missing_ok=True)
+
     st.session_state.last_job_message = message
     st.session_state.active_job = None
 
@@ -334,22 +414,23 @@ def _render_active_job_panel() -> None:
         return
 
     elapsed = int(time.time() - active_job["started_at"])
-    st.info(f"{active_job['label']} 실행 중... ({elapsed}초 경과)")
+    cancel_suffix = " | 취소 요청됨(현재 chunk 마무리 후 종료)" if active_job.get("cancel_requested") else ""
+    st.info(f"{active_job['label']} 실행 중... ({elapsed}초 경과){cancel_suffix}")
     c1, c2 = st.columns([1, 1])
     with c1:
         if st.button("진행상태 새로고침", key="refresh_active_job"):
             _safe_rerun()
     with c2:
         if st.button("작업 취소", type="secondary", key="cancel_active_job"):
-            process = active_job["process"]
-            if process.is_alive():
-                process.terminate()
-                process.join(timeout=1)
-            st.session_state.active_job = None
+            cancel_flag = active_job.get("cancel_flag_path")
+            if cancel_flag:
+                Path(cancel_flag).touch()
+            active_job["cancel_requested"] = True
+            st.session_state.active_job = active_job
             st.session_state.last_job_message = {
                 "status": "cancelled",
                 "job_type": active_job["job_type"],
-                "message": f"{active_job['label']} 작업을 취소했습니다.",
+                "message": f"{active_job['label']} 취소 요청을 보냈습니다. 현재 chunk 완료 후 안전 중단됩니다.",
             }
             _safe_rerun()
 
@@ -630,10 +711,14 @@ if last_job_message:
     if status == "success":
         if job_type in {"full_refresh", "initial_backfill"}:
             result = last_job_message.get("result", {})
+            chunks_done = last_job_message.get("chunks_done", 1)
+            total_chunks = last_job_message.get("total_chunks", chunks_done)
+            snapshot_rebuilt = bool(last_job_message.get("snapshot_rebuilt", result.get("snapshot", 0) > 0))
+            snapshot_rows = int(last_job_message.get("snapshot_rows", result.get("snapshot", 0)))
             st.success(
                 f"수집 완료({'초기 백필' if job_type == 'initial_backfill' else '일일 증분'}): {result.get('asof_date')} | 티커 {result.get('tickers', 0)}개 | "
-                f"prices {result.get('prices', 0):,}건 | cap {result.get('cap', 0):,}건 | "
-                f"fundamental {result.get('fundamental', 0):,}건 | snapshot {result.get('snapshot', 0):,}건"
+                f"prices {result.get('prices', 0):,}건 | cap {result.get('cap', 0):,}건 | fundamental {result.get('fundamental', 0):,}건 | "
+                f"chunks done {chunks_done}/{total_chunks} | snapshot rebuilt {'yes' if snapshot_rebuilt else 'no'} ({snapshot_rows:,}건)"
             )
         elif job_type in {"snapshot_refresh", "auto_snapshot_sync"}:
             result = last_job_message.get("result", {})
@@ -678,6 +763,13 @@ with setting_cols[0]:
         help="스냅샷 계산/초기 수집에 사용하는 가격 기간(10년 이상)",
     )
 with setting_cols[1]:
+    st.selectbox(
+        "증분 잡 전략",
+        options=["single_pass_with_snapshot", "chunked_5_then_snapshot"],
+        key="incremental_job_mode",
+        format_func=lambda value: "기본(1회 수집+스냅샷)" if value == "single_pass_with_snapshot" else "청크 1~5 수집 후 스냅샷 1회",
+    )
+with setting_cols[2]:
     st.caption("초기 백필은 긴 기간 전체를, 일일 증분은 체크포인트 이후만 수집합니다.")
 
 c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
@@ -695,7 +787,14 @@ if refresh_backfill:
     _safe_rerun()
 
 if refresh_incremental:
-    _start_background_job("full_refresh", "일일 증분 + 스냅샷", None)
+    chunked_mode = st.session_state.get("incremental_job_mode") == "chunked_5_then_snapshot"
+    job_label = "일일 증분(청크 1~5) + 스냅샷" if chunked_mode else "일일 증분 + 스냅샷"
+    _start_background_job(
+        "full_refresh",
+        job_label,
+        None,
+        run_options={"chunked_snapshot_strategy": chunked_mode},
+    )
     _safe_rerun()
 
 if refresh_snapshot:
