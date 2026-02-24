@@ -106,14 +106,27 @@ class DailyBatchPipeline:
                     time.sleep(sleep_s)
         raise RuntimeError(f"{label} failed after retries: {last_error}") from last_error
 
-    def run(self, asof_date: str | None = None, lookback_days: int = 3650, initial_backfill: bool = False) -> BatchResult:
+    def run(
+        self,
+        asof_date: str | None = None,
+        lookback_days: int = 3650,
+        initial_backfill: bool = False,
+        chunk_years: int = 2,
+        chunks: int = 1,
+    ) -> BatchResult:
         dt = pd.to_datetime(asof_date).date() if asof_date else self.collector.recent_business_day()
         asof_str = dt.strftime("%Y-%m-%d")
+        chunk_years = max(1, chunk_years)
+        chunks = max(1, chunks)
+        run_id = f"daily_batch:{asof_str}"
+        checkpoint_key = f"fundamental_chunk:{asof_str}:{chunk_years}:{chunks}"
         logger.info(
-            "Starting daily batch: asof=%s, lookback_days=%s, initial_backfill=%s",
+            "Starting daily batch: asof=%s, lookback_days=%s, initial_backfill=%s, chunk_years=%s, chunks=%s",
             asof_str,
             lookback_days,
             initial_backfill,
+            chunk_years,
+            chunks,
         )
 
         tickers = self.collector.tickers()
@@ -172,37 +185,102 @@ class DailyBatchPipeline:
         fund_rows = 0
         latest_fundamental = self.repo.get_latest_fundamental_date()
         if initial_backfill:
-            fundamental_from_dt = dt - timedelta(days=max(lookback_days, 3650) + 365)
+            base_from_dt = dt - timedelta(days=max(lookback_days, 3650) + 365)
         elif latest_fundamental:
-            fundamental_from_dt = pd.to_datetime(latest_fundamental).date() - timedelta(days=31)
+            base_from_dt = pd.to_datetime(latest_fundamental).date() - timedelta(days=31)
         else:
-            fundamental_from_dt = dt - timedelta(days=400)
+            base_from_dt = dt - timedelta(days=400)
 
-        fundamental_trading_dates = self.collector.trading_dates(fundamental_from_dt, dt)
-        fund_dates = self._fundamental_backfill_dates(dt, fundamental_trading_dates)
-        logger.info("Fundamental fetch anchors: %s dates (window=%s~%s)", len(fund_dates), fundamental_from_dt, dt)
-        for idx, fdt in enumerate(fund_dates, start=1):
+        saved_chunk = self.repo.get_batch_checkpoint(checkpoint_key)
+        start_chunk = int(saved_chunk) if saved_chunk and saved_chunk.isdigit() else 1
+        start_chunk = min(max(start_chunk, 1), chunks)
+
+        for chunk_idx in range(start_chunk, chunks + 1):
+            chunk_start = dt - timedelta(days=chunk_years * 365 * chunk_idx)
+            chunk_end = dt - timedelta(days=chunk_years * 365 * (chunk_idx - 1))
+            chunk_from_dt = max(base_from_dt, chunk_start)
+            chunk_to_dt = min(dt, chunk_end)
+            if chunk_from_dt > chunk_to_dt:
+                continue
+
+            stage = f"fundamental_chunk_{chunk_idx}"
+            self.repo.log_job_stage(
+                run_id=run_id,
+                stage=stage,
+                status="running",
+                message=f"range={chunk_from_dt}~{chunk_to_dt}",
+            )
             try:
-                fund_frame = self._safe_collect(
-                    self.collector.fundamental_market_metrics,
-                    fdt,
-                    label=f"fundamental:{fdt}",
+                fundamental_trading_dates = self.collector.trading_dates(chunk_from_dt, chunk_to_dt)
+                fund_dates = self._fundamental_backfill_dates(chunk_to_dt, fundamental_trading_dates)
+                chunk_rows = 0
+                logger.info(
+                    "Fundamental fetch anchors: chunk=%s/%s, dates=%s, window=%s~%s",
+                    chunk_idx,
+                    chunks,
+                    len(fund_dates),
+                    chunk_from_dt,
+                    chunk_to_dt,
                 )
-                financial_frame = self._safe_collect(self._collect_financials, fdt, label=f"financials:{fdt}")
-                fund_rows += self.repo.upsert_fundamental(fund_frame)
-                fund_rows += self.repo.upsert_financials(financial_frame, fdt.strftime("%Y-%m-%d"))
-                touched = set()
-                if not fund_frame.empty:
-                    touched.update(fund_frame["ticker"].astype(str).tolist())
-                if not financial_frame.empty:
-                    touched.update(financial_frame["ticker"].astype(str).tolist())
-                checkpoint_date = fdt.strftime("%Y-%m-%d")
-                for ticker in touched:
-                    self.repo.upsert_collection_checkpoint(ticker, last_fundamental_date=checkpoint_date)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Fundamental collection failed date=%s: %s", fdt, exc)
-            if idx % 10 == 0 or idx == len(fund_dates):
-                logger.info("Fundamental progress: %s/%s dates, rows=%s", idx, len(fund_dates), fund_rows)
+                for idx, fdt in enumerate(fund_dates, start=1):
+                    fund_frame = self._safe_collect(
+                        self.collector.fundamental_market_metrics,
+                        fdt,
+                        label=f"fundamental:{fdt}",
+                    )
+                    financial_frame = self._safe_collect(self._collect_financials, fdt, label=f"financials:{fdt}")
+                    upsert_rows = self.repo.upsert_fundamental(fund_frame)
+                    upsert_rows += self.repo.upsert_financials(financial_frame, fdt.strftime("%Y-%m-%d"))
+                    fund_rows += upsert_rows
+                    chunk_rows += upsert_rows
+                    touched = set()
+                    if not fund_frame.empty:
+                        touched.update(fund_frame["ticker"].astype(str).tolist())
+                    if not financial_frame.empty:
+                        touched.update(financial_frame["ticker"].astype(str).tolist())
+                    checkpoint_date = fdt.strftime("%Y-%m-%d")
+                    for ticker in touched:
+                        self.repo.upsert_collection_checkpoint(ticker, last_fundamental_date=checkpoint_date)
+                    if idx % 10 == 0 or idx == len(fund_dates):
+                        logger.info(
+                            "Fundamental progress chunk=%s/%s: %s/%s dates, chunk_rows=%s, total_rows=%s",
+                            chunk_idx,
+                            chunks,
+                            idx,
+                            len(fund_dates),
+                            chunk_rows,
+                            fund_rows,
+                        )
+
+                self.repo.log_job_stage(
+                    run_id=run_id,
+                    stage=stage,
+                    status="success",
+                    message=f"chunk={chunk_idx}/{chunks}, range={chunk_from_dt}~{chunk_to_dt}",
+                    row_count=chunk_rows,
+                )
+                logger.info(
+                    "Fundamental chunk done: chunk=%s/%s, range=%s~%s, upsert_rows=%s",
+                    chunk_idx,
+                    chunks,
+                    chunk_from_dt,
+                    chunk_to_dt,
+                    chunk_rows,
+                )
+                if chunk_idx < chunks:
+                    self.repo.set_batch_checkpoint(checkpoint_key, str(chunk_idx + 1))
+                else:
+                    self.repo.clear_batch_checkpoint(checkpoint_key)
+            except Exception as exc:
+                self.repo.log_job_stage(
+                    run_id=run_id,
+                    stage=stage,
+                    status="failed",
+                    message=f"chunk={chunk_idx}/{chunks}, range={chunk_from_dt}~{chunk_to_dt}, error={exc}",
+                )
+                self.repo.set_batch_checkpoint(checkpoint_key, str(chunk_idx))
+                logger.error("Fundamental chunk failed: chunk=%s/%s, error=%s", chunk_idx, chunks, exc)
+                raise
 
         price_window = self.repo.get_price_window(asof_str, window=lookback_days)
         daily = self.repo.get_daily_join(asof_str)

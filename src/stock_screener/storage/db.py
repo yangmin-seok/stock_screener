@@ -142,6 +142,13 @@ CREATE TABLE IF NOT EXISTS collection_checkpoint (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+
+CREATE TABLE IF NOT EXISTS batch_checkpoint (
+    checkpoint_key TEXT PRIMARY KEY,
+    checkpoint_value TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_prices_ticker_date ON prices_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_cap_ticker_date ON cap_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_fund_ticker_date ON fundamental_daily(ticker, date);

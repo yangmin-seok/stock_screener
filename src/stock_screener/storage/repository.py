@@ -330,6 +330,61 @@ class Repository:
                 (ticker, last_price_date, last_fundamental_date),
             )
 
+    def log_job_stage(
+        self,
+        *,
+        run_id: str,
+        stage: str,
+        status: str,
+        message: str | None = None,
+        row_count: int | None = None,
+    ) -> None:
+        with db_session(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO job_log(run_id, stage, status, started_at, ended_at, message, row_count)
+                VALUES (
+                    ?, ?, ?, CURRENT_TIMESTAMP,
+                    CASE WHEN ? IN ('success', 'failed') THEN CURRENT_TIMESTAMP ELSE NULL END,
+                    ?, ?
+                )
+                ON CONFLICT(run_id, stage) DO UPDATE SET
+                    status=excluded.status,
+                    ended_at=CASE
+                        WHEN excluded.status IN ('success', 'failed') THEN CURRENT_TIMESTAMP
+                        ELSE job_log.ended_at
+                    END,
+                    message=excluded.message,
+                    row_count=excluded.row_count
+                """,
+                (run_id, stage, status, status, message, row_count),
+            )
+
+    def get_batch_checkpoint(self, checkpoint_key: str) -> str | None:
+        with db_session(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT checkpoint_value FROM batch_checkpoint WHERE checkpoint_key = ?",
+                (checkpoint_key,),
+            ).fetchone()
+        return row[0] if row and row[0] else None
+
+    def set_batch_checkpoint(self, checkpoint_key: str, checkpoint_value: str) -> None:
+        with db_session(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO batch_checkpoint(checkpoint_key, checkpoint_value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(checkpoint_key) DO UPDATE SET
+                    checkpoint_value=excluded.checkpoint_value,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (checkpoint_key, checkpoint_value),
+            )
+
+    def clear_batch_checkpoint(self, checkpoint_key: str) -> None:
+        with db_session(self.db_path) as conn:
+            conn.execute("DELETE FROM batch_checkpoint WHERE checkpoint_key = ?", (checkpoint_key,))
+
     def get_latest_snapshot_date(self) -> str | None:
         with db_session(self.db_path) as conn:
             row = conn.execute("SELECT MAX(asof_date) AS d FROM snapshot_metrics").fetchone()
