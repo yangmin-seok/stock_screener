@@ -692,7 +692,13 @@ if base.empty:
     st.stop()
 
 st.subheader(f"Snapshot as of {asof}")
+financial_meta = repo.get_latest_financial_period(asof)
 st.write(f"현재 snapshot 종목 수: **{len(base):,}개**")
+st.caption(
+    "데이터 기준일(asof): "
+    f"{asof} | 재무 기준기간: {financial_meta.get('fiscal_period') or '-'}"
+    f" ({financial_meta.get('period_type') or '-'})"
+)
 
 st.markdown("### 조건 선택")
 st.caption("조건은 Any + 임계치 방식으로 설정되며, 계산 불가한 항목은 자동 비활성화됩니다.")
@@ -1091,7 +1097,7 @@ if condition_summaries:
 
 show_cols = [
     "ticker", "name", "market", "close", "mcap", "avg_value_20d", "current_value", "relative_value", "pbr", "reserve_ratio", "per", "div", "dps",
-    "eps", "bps", "roe_proxy", "eps_positive", "ret_3m", "ret_6m", "ret_1y", "dist_sma200", "pos_52w",
+    "eps", "bps", "fiscal_period", "period_type", "reported_date", "consolidation_type", "financial_source", "roe_proxy", "eps_positive", "ret_3m", "ret_6m", "ret_1y", "dist_sma200", "pos_52w",
     "near_52w_high_ratio", "eps_cagr_5y", "eps_yoy_q",
 ]
 st.dataframe(

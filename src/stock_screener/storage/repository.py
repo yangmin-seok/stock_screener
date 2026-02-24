@@ -17,7 +17,6 @@ class Repository:
         data = data.where(pd.notna(data), None)
         return [tuple(row) for row in data.itertuples(index=False, name=None)]
 
-
     def upsert_tickers(self, frame: pd.DataFrame) -> int:
         if frame.empty:
             return 0
@@ -88,20 +87,62 @@ class Repository:
         data = frame.copy()
         if "reserve_ratio" not in data.columns:
             data["reserve_ratio"] = pd.NA
-        rows = self._to_sql_records(data, ["date", "ticker", "per", "pbr", "eps", "bps", "div", "dps", "reserve_ratio"])
+        rows = self._to_sql_records(data, ["date", "ticker", "per", "pbr", "div", "dps", "reserve_ratio"])
         with db_session(self.db_path) as conn:
             conn.executemany(
                 """
-                INSERT INTO fundamental_daily(date, ticker, per, pbr, eps, bps, div, dps, reserve_ratio, source_ts)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO fundamental_daily(date, ticker, per, pbr, div, dps, reserve_ratio, source_ts)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(date, ticker) DO UPDATE SET
                     per=excluded.per,
                     pbr=excluded.pbr,
-                    eps=excluded.eps,
-                    bps=excluded.bps,
                     div=excluded.div,
                     dps=excluded.dps,
                     reserve_ratio=COALESCE(excluded.reserve_ratio, fundamental_daily.reserve_ratio),
+                    source_ts=CURRENT_TIMESTAMP
+                """,
+                rows,
+            )
+        return len(rows)
+
+    def upsert_financials(self, frame: pd.DataFrame, asof_date: str) -> int:
+        if frame.empty:
+            return 0
+        data = frame.copy()
+        data["date"] = asof_date
+        rows = self._to_sql_records(
+            data,
+            [
+                "date",
+                "ticker",
+                "fiscal_period",
+                "period_type",
+                "reported_date",
+                "consolidation_type",
+                "source",
+                "revenue",
+                "operating_income",
+                "net_income",
+                "eps",
+                "bps",
+            ],
+        )
+        with db_session(self.db_path) as conn:
+            conn.executemany(
+                """
+                INSERT INTO financials_daily(
+                    date, ticker, fiscal_period, period_type, reported_date, consolidation_type, source,
+                    revenue, operating_income, net_income, eps, bps, source_ts
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(date, ticker, fiscal_period, period_type, consolidation_type) DO UPDATE SET
+                    reported_date=excluded.reported_date,
+                    source=excluded.source,
+                    revenue=COALESCE(excluded.revenue, financials_daily.revenue),
+                    operating_income=COALESCE(excluded.operating_income, financials_daily.operating_income),
+                    net_income=COALESCE(excluded.net_income, financials_daily.net_income),
+                    eps=COALESCE(excluded.eps, financials_daily.eps),
+                    bps=COALESCE(excluded.bps, financials_daily.bps),
                     source_ts=CURRENT_TIMESTAMP
                 """,
                 rows,
@@ -134,7 +175,7 @@ class Repository:
                 return 0
             cols = [
                 "asof_date", "ticker", "name", "market", "close", "mcap", "avg_value_20d", "current_value", "relative_value", "turnover_20d",
-                "per", "pbr", "div", "dps", "eps", "bps", "reserve_ratio", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
+                "per", "pbr", "div", "dps", "eps", "bps", "reserve_ratio", "fiscal_period", "period_type", "reported_date", "consolidation_type", "financial_source", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
                 "dist_sma20", "dist_sma50", "dist_sma200", "high_52w", "low_52w", "pos_52w", "near_52w_high_ratio",
                 "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_5y", "eps_yoy_q", "calc_version",
             ]
@@ -144,7 +185,7 @@ class Repository:
                 f"""
                 INSERT INTO snapshot_metrics(
                     asof_date, ticker, name, market, close, mcap, avg_value_20d, current_value, relative_value, turnover_20d,
-                    per, pbr, div, dps, eps, bps, reserve_ratio, roe_proxy, eps_positive, sma20, sma50, sma200,
+                    per, pbr, div, dps, eps, bps, reserve_ratio, fiscal_period, period_type, reported_date, consolidation_type, financial_source, roe_proxy, eps_positive, sma20, sma50, sma200,
                     dist_sma20, dist_sma50, dist_sma200, high_52w, low_52w, pos_52w, near_52w_high_ratio,
                     vol_20d, ret_1w, ret_1m, ret_3m, ret_6m, ret_1y, eps_cagr_5y, eps_yoy_q, calc_version
                 ) VALUES ({placeholders})
@@ -179,22 +220,38 @@ class Repository:
 
     def get_daily_join(self, dt: str) -> pd.DataFrame:
         query = """
+        WITH fin AS (
+            SELECT f.*
+            FROM financials_daily f
+            JOIN (
+                SELECT ticker,
+                       MAX(COALESCE(reported_date, fiscal_period, date)) AS rank_date
+                FROM financials_daily
+                WHERE date <= ?
+                GROUP BY ticker
+            ) ranked
+              ON ranked.ticker = f.ticker
+             AND COALESCE(f.reported_date, f.fiscal_period, f.date) = ranked.rank_date
+            WHERE f.date <= ?
+        )
         SELECT t.ticker, t.name, t.market,
                c.mcap,
-               f.per, f.pbr, f.eps, f.bps, f.div, f.dps, f.reserve_ratio
+               f.per, f.pbr, f.div, f.dps, f.reserve_ratio,
+               fin.eps, fin.bps, fin.fiscal_period, fin.period_type,
+               fin.reported_date, fin.consolidation_type, fin.source AS financial_source
         FROM ticker_master t
         LEFT JOIN cap_daily c ON c.ticker = t.ticker AND c.date = ?
         LEFT JOIN fundamental_daily f ON f.ticker = t.ticker AND f.date = ?
+        LEFT JOIN fin ON fin.ticker = t.ticker
         WHERE t.active_flag = 1
         """
         with db_session(self.db_path) as conn:
-            return pd.read_sql_query(query, conn, params=(dt, dt))
-
+            return pd.read_sql_query(query, conn, params=(dt, dt, dt, dt))
 
     def get_fundamental_window(self, end_date: str, years: int = 6) -> pd.DataFrame:
         query = """
-        SELECT date, ticker, per, pbr, eps, bps, div, dps, reserve_ratio
-        FROM fundamental_daily
+        SELECT date, ticker, eps, bps, fiscal_period, period_type, reported_date, consolidation_type, source
+        FROM financials_daily
         WHERE date <= ?
           AND date >= date(?, ?)
         ORDER BY ticker, date
@@ -202,6 +259,23 @@ class Repository:
         with db_session(self.db_path) as conn:
             return pd.read_sql_query(query, conn, params=(end_date, end_date, f"-{years} years"))
 
+    def get_latest_financial_period(self, dt: str) -> dict[str, str | None]:
+        query = """
+        SELECT fiscal_period, period_type, reported_date
+        FROM financials_daily
+        WHERE date <= ?
+        ORDER BY COALESCE(reported_date, fiscal_period, date) DESC
+        LIMIT 1
+        """
+        with db_session(self.db_path) as conn:
+            row = conn.execute(query, (dt,)).fetchone()
+        if not row:
+            return {"fiscal_period": None, "period_type": None, "reported_date": None}
+        return {
+            "fiscal_period": row[0],
+            "period_type": row[1],
+            "reported_date": row[2],
+        }
 
     def get_latest_price_date(self) -> str | None:
         with db_session(self.db_path) as conn:

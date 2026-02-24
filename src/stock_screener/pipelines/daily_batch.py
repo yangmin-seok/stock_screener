@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from stock_screener.collectors.pykrx_client import PykrxCollector
+from stock_screener.collectors.fundamental_provider import FundamentalProvider, merge_financial_records
 from stock_screener.collectors.naver_ratio_client import NaverRatioCollector
+from stock_screener.collectors.pykrx_client import PykrxCollector, PykrxFinancialFallbackProvider
 from stock_screener.features.metrics import build_snapshot
 from stock_screener.storage.db import init_db
 from stock_screener.storage.repository import Repository
@@ -34,6 +35,9 @@ class DailyBatchPipeline:
         self.repo = Repository(self.db_path)
         self.collector = PykrxCollector()
         self.ratio_collector = NaverRatioCollector()
+        self.financial_providers: list[FundamentalProvider] = [
+            PykrxFinancialFallbackProvider(self.collector),
+        ]
 
     def update_reserve_ratio_only(self, asof_date: str | None = None) -> tuple[str, int]:
         if asof_date:
@@ -66,7 +70,6 @@ class DailyBatchPipeline:
         ts = pd.Series(pd.to_datetime(sorted(trading_dates)))
         dates: set[date] = set()
 
-        # Use last trading day of each month/quarter to improve EPS history coverage.
         month_last = ts.groupby(ts.dt.to_period("M")).max()
         quarter_last = ts.groupby(ts.dt.to_period("Q")).max()
         dates.update(dt.date() for dt in month_last.tolist())
@@ -81,6 +84,13 @@ class DailyBatchPipeline:
                 dates.add(candidates.iloc[-1].date())
 
         return sorted(dates)
+
+    def _collect_financials(self, dt: date) -> pd.DataFrame:
+        provider_frames = [provider.fetch_financials(dt) for provider in self.financial_providers]
+        merged = merge_financial_records(provider_frames)
+        if merged.empty:
+            logger.warning("No financial provider rows for date=%s", dt)
+        return merged
 
     def run(self, asof_date: str | None = None, lookback_days: int = 400) -> BatchResult:
         dt = pd.to_datetime(asof_date).date() if asof_date else self.collector.recent_business_day()
@@ -101,7 +111,6 @@ class DailyBatchPipeline:
             if idx % 200 == 0 or idx == ticker_count:
                 logger.info("Price progress: %s/%s tickers, rows=%s", idx, ticker_count, price_rows)
 
-        # Root fix: trade value time-series is sourced from cap_daily (KRX 공식 거래대금)
         cap_rows = 0
         trading_dates = self.collector.trading_dates(price_from_dt, dt)
         for idx, trading_dt in enumerate(trading_dates, start=1):
@@ -113,14 +122,10 @@ class DailyBatchPipeline:
         fundamental_from_dt = dt - timedelta(days=365 * 6)
         fundamental_trading_dates = self.collector.trading_dates(fundamental_from_dt, dt)
         fund_dates = self._fundamental_backfill_dates(dt, fundamental_trading_dates)
-        logger.info(
-            "Fundamental fetch anchors: %s dates (window=%s~%s)",
-            len(fund_dates),
-            fundamental_from_dt,
-            dt,
-        )
+        logger.info("Fundamental fetch anchors: %s dates (window=%s~%s)", len(fund_dates), fundamental_from_dt, dt)
         for idx, fdt in enumerate(fund_dates, start=1):
-            fund_rows += self.repo.upsert_fundamental(self.collector.fundamental(fdt))
+            fund_rows += self.repo.upsert_fundamental(self.collector.fundamental_market_metrics(fdt))
+            fund_rows += self.repo.upsert_financials(self._collect_financials(fdt), fdt.strftime("%Y-%m-%d"))
             if idx % 10 == 0 or idx == len(fund_dates):
                 logger.info("Fundamental progress: %s/%s dates, rows=%s", idx, len(fund_dates), fund_rows)
 
@@ -178,18 +183,6 @@ class DailyBatchPipeline:
         snapshot = build_snapshot(price_window, daily, fund_hist, asof_str)
         snap_rows = self.repo.replace_snapshot(asof_str, snapshot)
 
-        logger.info(
-            "Snapshot-only rebuild completed: asof=%s, tickers=%s, snapshot=%s",
-            asof_str,
-            ticker_count,
-            snap_rows,
-        )
+        logger.info("Snapshot-only rebuild completed: asof=%s, tickers=%s, snapshot=%s", asof_str, ticker_count, snap_rows)
 
-        return BatchResult(
-            asof_date=asof_str,
-            tickers=ticker_count,
-            prices=0,
-            cap=0,
-            fundamental=0,
-            snapshot=snap_rows,
-        )
+        return BatchResult(asof_date=asof_str, tickers=ticker_count, prices=0, cap=0, fundamental=0, snapshot=snap_rows)

@@ -8,6 +8,8 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 from pykrx import stock
 
+from stock_screener.collectors.fundamental_provider import FundamentalProviderConfig, FUNDAMENTAL_SOURCE_PRIORITY
+
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +140,7 @@ class PykrxCollector:
         logger.debug("Collected market cap rows=%s for date=%s", len(frame), dt)
         return frame
 
-    def fundamental(self, dt: date) -> pd.DataFrame:
+    def fundamental_market_metrics(self, dt: date) -> pd.DataFrame:
         query_dt = dt
         frame = self._retry(stock.get_market_fundamental, self.fmt(query_dt), market="ALL")
         if frame.empty:
@@ -157,17 +159,56 @@ class PykrxCollector:
             columns={
                 "PER": "per",
                 "PBR": "pbr",
-                "EPS": "eps",
-                "BPS": "bps",
                 "DIV": "div",
                 "DPS": "dps",
             }
         )
-        for col in ("per", "pbr", "eps", "bps", "div", "dps"):
+        for col in ("per", "pbr", "div", "dps"):
             if col not in frame.columns:
                 frame[col] = pd.NA
         frame.index.name = "ticker"
-        frame = frame.reset_index()[["ticker", "per", "pbr", "eps", "bps", "div", "dps"]]
+        frame = frame.reset_index()[["ticker", "per", "pbr", "div", "dps"]]
         frame["date"] = query_dt.strftime("%Y-%m-%d")
-        logger.debug("Collected fundamental rows=%s for date=%s", len(frame), query_dt)
+        logger.debug("Collected market fundamental rows=%s for date=%s", len(frame), query_dt)
         return frame
+
+    # Backward-compatible alias.
+    def fundamental(self, dt: date) -> pd.DataFrame:
+        return self.fundamental_market_metrics(dt)
+
+
+class PykrxFinancialFallbackProvider:
+    config = FundamentalProviderConfig(source_name="pykrx_fallback", priority_tier="fallback")
+
+    def __init__(self, collector: PykrxCollector):
+        self.collector = collector
+
+    def fetch_financials(self, dt: date) -> pd.DataFrame:
+        frame = self.collector._retry(stock.get_market_fundamental, self.collector.fmt(dt), market="ALL")
+        if frame.empty:
+            return pd.DataFrame()
+
+        frame = frame.rename(columns={"EPS": "eps", "BPS": "bps"})
+        for col in ("eps", "bps"):
+            if col not in frame.columns:
+                frame[col] = pd.NA
+
+        period = date(dt.year, 12, 31).strftime("%Y-%m-%d")
+        out = pd.DataFrame(
+            {
+                "ticker": frame.index,
+                "fiscal_period": period,
+                "period_type": "annual",
+                "reported_date": dt.strftime("%Y-%m-%d"),
+                "consolidation_type": "unknown",
+                "revenue": pd.NA,
+                "operating_income": pd.NA,
+                "net_income": pd.NA,
+                "eps": pd.to_numeric(frame["eps"], errors="coerce"),
+                "bps": pd.to_numeric(frame["bps"], errors="coerce"),
+                "source": self.config.source_name,
+                "source_priority": FUNDAMENTAL_SOURCE_PRIORITY[self.config.priority_tier],
+                "is_correction": 0,
+            }
+        )
+        return out
