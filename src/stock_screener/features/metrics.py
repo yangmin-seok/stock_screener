@@ -5,7 +5,7 @@ import pandas as pd
 
 from stock_screener.features.fundamental_growth import GrowthResult, compute_growth_bundle
 
-CALC_VERSION = "v1.2"
+CALC_VERSION = "v1.3"
 
 
 def _result_to_row(result: GrowthResult) -> dict[str, object]:
@@ -90,6 +90,10 @@ def build_snapshot(
     growth = pd.concat([growth, growth["ticker"].apply(_growth_row)], axis=1)
     merged = merged.merge(growth, on="ticker", how="left")
 
+    counts = price_window.groupby("ticker")["close"].size()
+    merged["has_price_5y"] = merged["ticker"].map(lambda t: int(counts.get(t, 0) >= 252 * 5))
+    merged["has_price_10y"] = merged["ticker"].map(lambda t: int(counts.get(t, 0) >= 252 * 10))
+
     merged["asof_date"] = asof_date
     merged["calc_version"] = CALC_VERSION
 
@@ -99,6 +103,6 @@ def build_snapshot(
         "dist_sma20", "dist_sma50", "dist_sma200", "high_52w", "low_52w", "pos_52w", "near_52w_high_ratio",
         "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_5y", "eps_yoy_q", "eps_growth_ttm", "sales_growth_qoq",
         "eps_cagr_5y_window_years", "eps_cagr_5y_asof", "eps_cagr_5y_sample_count",
-        "eps_yoy_q_window_years", "eps_yoy_q_asof", "eps_yoy_q_sample_count", "calc_version",
+        "eps_yoy_q_window_years", "eps_yoy_q_asof", "eps_yoy_q_sample_count", "has_price_5y", "has_price_10y", "calc_version",
     ]
     return merged[cols]

@@ -117,6 +117,8 @@ CREATE TABLE IF NOT EXISTS snapshot_metrics (
     eps_yoy_q_window_years INTEGER,
     eps_yoy_q_asof TEXT,
     eps_yoy_q_sample_count INTEGER,
+    has_price_5y INTEGER,
+    has_price_10y INTEGER,
     calc_version TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (asof_date, ticker)
@@ -131,6 +133,13 @@ CREATE TABLE IF NOT EXISTS job_log (
     message TEXT,
     row_count INTEGER,
     PRIMARY KEY (run_id, stage)
+);
+
+CREATE TABLE IF NOT EXISTS collection_checkpoint (
+    ticker TEXT PRIMARY KEY,
+    last_price_date TEXT,
+    last_fundamental_date TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_prices_ticker_date ON prices_daily(ticker, date);
@@ -174,6 +183,8 @@ def init_db(db_path: str | Path) -> None:
         _ensure_column(conn, "snapshot_metrics", "eps_yoy_q_window_years", "INTEGER")
         _ensure_column(conn, "snapshot_metrics", "eps_yoy_q_asof", "TEXT")
         _ensure_column(conn, "snapshot_metrics", "eps_yoy_q_sample_count", "INTEGER")
+        _ensure_column(conn, "snapshot_metrics", "has_price_5y", "INTEGER")
+        _ensure_column(conn, "snapshot_metrics", "has_price_10y", "INTEGER")
         _ensure_column(conn, "snapshot_metrics", "fiscal_period", "TEXT")
         _ensure_column(conn, "snapshot_metrics", "period_type", "TEXT")
         _ensure_column(conn, "snapshot_metrics", "reported_date", "TEXT")

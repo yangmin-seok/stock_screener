@@ -26,6 +26,9 @@ st.title("🇰🇷 한국 주식 Fundamental Screener (pykrx + SQLite cache)")
 st.caption("최초 실행 시 pykrx 수집으로 시간이 걸리며, 이후에는 DB snapshot을 재사용합니다.")
 st.caption("기본 asof = 최신 거래일(가격 데이터 기준), 해당 거래일 snapshot이 없으면 재계산이 필요합니다.")
 
+if "collect_lookback_days" not in st.session_state:
+    st.session_state.collect_lookback_days = 3650
+
 
 @dataclass(frozen=True)
 class FilterSpec:
@@ -73,6 +76,8 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("eps_cagr_5y_min", "float", 0.15),
     FilterSpec("apply_eps_yoy_q", "bool", False),
     FilterSpec("eps_yoy_q_min", "float", 0.25),
+    FilterSpec("apply_has_price_5y", "bool", False),
+    FilterSpec("apply_has_price_10y", "bool", False),
     FilterSpec("above_200ma", "bool", False),
     FilterSpec("apply_near_high", "bool", False),
     FilterSpec("near_high_min", "float", 0.9),
@@ -240,22 +245,22 @@ def _serialize_query_filter_value(spec: FilterSpec, value: Any) -> str | list[st
     return None
 
 
-def _job_worker(db_path: str, job_type: str, asof_date: str | None, result_queue: mp.Queue) -> None:
+def _job_worker(db_path: str, job_type: str, asof_date: str | None, lookback_days: int, result_queue: mp.Queue) -> None:
     worker_pipeline = DailyBatchPipeline(Path(db_path))
     try:
         if job_type == "full_refresh":
-            result = worker_pipeline.run(asof_date=None)
+            result = worker_pipeline.run(asof_date=None, lookback_days=lookback_days, initial_backfill=False)
             result_queue.put({"status": "success", "job_type": job_type, "result": result.__dict__})
             return
 
         if job_type in {"snapshot_refresh", "auto_snapshot_sync"}:
-            result = worker_pipeline.rebuild_snapshot_only(asof_date=asof_date)
+            result = worker_pipeline.rebuild_snapshot_only(asof_date=asof_date, lookback_days=lookback_days)
             result_queue.put({"status": "success", "job_type": job_type, "result": result.__dict__})
             return
 
         if job_type == "reserve_refresh":
             updated_asof, updated_rows = worker_pipeline.update_reserve_ratio_only(asof_date=asof_date)
-            snap_result = worker_pipeline.rebuild_snapshot_only(asof_date=updated_asof)
+            snap_result = worker_pipeline.rebuild_snapshot_only(asof_date=updated_asof, lookback_days=lookback_days)
             result_queue.put(
                 {
                     "status": "success",
@@ -272,14 +277,15 @@ def _job_worker(db_path: str, job_type: str, asof_date: str | None, result_queue
         result_queue.put({"status": "error", "job_type": job_type, "error": str(exc)})
 
 
-def _start_background_job(job_type: str, label: str, asof_date: str | None) -> None:
+def _start_background_job(job_type: str, label: str, asof_date: str | None, lookback_days: int | None = None) -> None:
     active_job = st.session_state.get("active_job")
     if active_job and active_job["process"].is_alive():
         st.warning("다른 작업이 이미 실행 중입니다. 완료되거나 취소 후 다시 시도하세요.")
         return
 
     result_queue: mp.Queue = mp.Queue()
-    process = mp.Process(target=_job_worker, args=(str(DB_PATH), job_type, asof_date, result_queue), daemon=True)
+    run_lookback = int(lookback_days if lookback_days is not None else st.session_state.get("collect_lookback_days", 3650))
+    process = mp.Process(target=_job_worker, args=(str(DB_PATH), job_type, asof_date, run_lookback, result_queue), daemon=True)
     process.start()
     st.session_state.active_job = {
         "job_type": job_type,
@@ -288,6 +294,7 @@ def _start_background_job(job_type: str, label: str, asof_date: str | None) -> N
         "process": process,
         "result_queue": result_queue,
         "started_at": time.time(),
+        "lookback_days": run_lookback,
     }
 
 
@@ -312,7 +319,7 @@ def _poll_background_job() -> None:
     st.session_state.active_job = None
 
     if message.get("status") == "success":
-        if message.get("job_type") in {"full_refresh", "snapshot_refresh", "auto_snapshot_sync"}:
+        if message.get("job_type") in {"full_refresh", "initial_backfill", "snapshot_refresh", "auto_snapshot_sync"}:
             result = message.get("result", {})
             st.session_state.asof = result.get("asof_date")
             if message.get("job_type") == "auto_snapshot_sync" and result.get("asof_date"):
@@ -621,10 +628,10 @@ if last_job_message:
     status = last_job_message.get("status")
     job_type = last_job_message.get("job_type")
     if status == "success":
-        if job_type == "full_refresh":
+        if job_type in {"full_refresh", "initial_backfill"}:
             result = last_job_message.get("result", {})
             st.success(
-                f"전체 수집 완료: {result.get('asof_date')} | 티커 {result.get('tickers', 0)}개 | "
+                f"수집 완료({'초기 백필' if job_type == 'initial_backfill' else '일일 증분'}): {result.get('asof_date')} | 티커 {result.get('tickers', 0)}개 | "
                 f"prices {result.get('prices', 0):,}건 | cap {result.get('cap', 0):,}건 | "
                 f"fundamental {result.get('fundamental', 0):,}건 | snapshot {result.get('snapshot', 0):,}건"
             )
@@ -659,16 +666,36 @@ if latest_price_date and latest_price_date != latest_snapshot_date:
 
 _render_active_job_panel()
 
-c1, c2, c3 = st.columns([1, 1, 1])
+st.markdown("### 수집 설정")
+setting_cols = st.columns([1, 1, 2])
+with setting_cols[0]:
+    st.number_input(
+        "lookback_days",
+        min_value=3650,
+        max_value=4000,
+        step=10,
+        key="collect_lookback_days",
+        help="스냅샷 계산/초기 수집에 사용하는 가격 기간(10년 이상)",
+    )
+with setting_cols[1]:
+    st.caption("초기 백필은 긴 기간 전체를, 일일 증분은 체크포인트 이후만 수집합니다.")
+
+c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
 with c1:
-    refresh_full = st.button("전체 수집 + 스냅샷", type="primary")
+    refresh_backfill = st.button("초기 백필 + 스냅샷", type="primary")
 with c2:
-    refresh_snapshot = st.button("스냅샷만 재계산", help="이미 수집된 DB 데이터로 snapshot만 다시 계산")
+    refresh_incremental = st.button("일일 증분 + 스냅샷")
 with c3:
+    refresh_snapshot = st.button("스냅샷만 재계산", help="이미 수집된 DB 데이터로 snapshot만 다시 계산")
+with c4:
     refresh_reserve = st.button("유보율만 업데이트", help="네이버 크롤링으로 최신 유보율만 업데이트")
 
-if refresh_full:
-    _start_background_job("full_refresh", "전체 수집 + 스냅샷", None)
+if refresh_backfill:
+    _start_background_job("initial_backfill", "초기 백필 + 스냅샷", None)
+    _safe_rerun()
+
+if refresh_incremental:
+    _start_background_job("full_refresh", "일일 증분 + 스냅샷", None)
     _safe_rerun()
 
 if refresh_snapshot:
@@ -681,7 +708,7 @@ if refresh_reserve:
 
 asof = st.session_state.asof
 if not asof:
-    st.warning("snapshot이 없습니다. 먼저 '전체 수집 + 스냅샷' 또는 '스냅샷만 재계산' 버튼을 실행하세요.")
+    st.warning("snapshot이 없습니다. 먼저 '초기 백필 + 스냅샷' 또는 '일일 증분 + 스냅샷' 또는 '스냅샷만 재계산' 버튼을 실행하세요.")
     st.stop()
 
 base = repo.load_snapshot(asof)
@@ -726,6 +753,8 @@ def _active_filter_count_from_state() -> int:
             int(bool(st.session_state.get("above_200ma", False))),
             int(bool(st.session_state.get("apply_eps_cagr_5y", False))),
             int(bool(st.session_state.get("apply_eps_yoy_q", False))),
+            int(bool(st.session_state.get("apply_has_price_5y", False))),
+            int(bool(st.session_state.get("apply_has_price_10y", False))),
             int(bool(st.session_state.get("apply_near_high", False))),
         ]
     )
@@ -873,6 +902,9 @@ with fundamental_tab:
         key="eps_yoy_q_min",
     )
 
+    apply_has_price_5y = st.checkbox("가격 데이터 5Y 커버리지 종목만", key="apply_has_price_5y")
+    apply_has_price_10y = st.checkbox("가격 데이터 10Y 커버리지 종목만", key="apply_has_price_10y")
+
 with technical_tab:
     above_200ma = st.checkbox("200일선 위 조건 적용", key="above_200ma")
 
@@ -992,6 +1024,10 @@ if apply_eps_cagr_5y:
     filtered = filtered[(filtered["eps_cagr_5y"].notna()) & (filtered["eps_cagr_5y"] >= eps_cagr_5y_min)]
 if apply_eps_yoy_q:
     filtered = filtered[(filtered["eps_yoy_q"].notna()) & (filtered["eps_yoy_q"] >= eps_yoy_q_min)]
+if apply_has_price_5y and "has_price_5y" in filtered.columns:
+    filtered = filtered[filtered["has_price_5y"] == 1]
+if apply_has_price_10y and "has_price_10y" in filtered.columns:
+    filtered = filtered[filtered["has_price_10y"] == 1]
 if apply_near_high:
     filtered = filtered[(filtered["near_52w_high_ratio"].notna()) & (filtered["near_52w_high_ratio"] >= near_high_min)]
 
@@ -1091,6 +1127,10 @@ if momentum_available and momentum_filter_mode != "Any":
     condition_summaries.append(
         f"{MOMENTUM_METRICS.get(momentum_metric, momentum_metric)} {_format_range_summary(momentum_filter_mode, momentum_bucket, momentum_min_custom, momentum_max_custom)}"
     )
+if st.session_state.get("apply_has_price_5y"):
+    condition_summaries.append("가격 5Y 커버리지")
+if st.session_state.get("apply_has_price_10y"):
+    condition_summaries.append("가격 10Y 커버리지")
 
 if condition_summaries:
     st.caption("현재 조건: " + " • ".join(condition_summaries))
@@ -1098,7 +1138,7 @@ if condition_summaries:
 show_cols = [
     "ticker", "name", "market", "close", "mcap", "avg_value_20d", "current_value", "relative_value", "pbr", "reserve_ratio", "per", "div", "dps",
     "eps", "bps", "fiscal_period", "period_type", "reported_date", "consolidation_type", "financial_source", "roe_proxy", "eps_positive", "ret_3m", "ret_6m", "ret_1y", "dist_sma200", "pos_52w",
-    "near_52w_high_ratio", "eps_cagr_5y", "eps_yoy_q",
+    "near_52w_high_ratio", "eps_cagr_5y", "eps_yoy_q", "has_price_5y", "has_price_10y",
 ]
 st.dataframe(
     filtered[show_cols],
