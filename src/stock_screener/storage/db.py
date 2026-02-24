@@ -109,6 +109,14 @@ CREATE TABLE IF NOT EXISTS snapshot_metrics (
     ret_1y REAL,
     eps_cagr_5y REAL,
     eps_yoy_q REAL,
+    eps_growth_ttm REAL,
+    sales_growth_qoq REAL,
+    eps_cagr_5y_window_years INTEGER,
+    eps_cagr_5y_asof TEXT,
+    eps_cagr_5y_sample_count INTEGER,
+    eps_yoy_q_window_years INTEGER,
+    eps_yoy_q_asof TEXT,
+    eps_yoy_q_sample_count INTEGER,
     calc_version TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (asof_date, ticker)
@@ -158,6 +166,14 @@ def init_db(db_path: str | Path) -> None:
         _ensure_column(conn, "snapshot_metrics", "near_52w_high_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_yoy_q", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "eps_growth_ttm", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "sales_growth_qoq", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y_window_years", "INTEGER")
+        _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y_asof", "TEXT")
+        _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y_sample_count", "INTEGER")
+        _ensure_column(conn, "snapshot_metrics", "eps_yoy_q_window_years", "INTEGER")
+        _ensure_column(conn, "snapshot_metrics", "eps_yoy_q_asof", "TEXT")
+        _ensure_column(conn, "snapshot_metrics", "eps_yoy_q_sample_count", "INTEGER")
         _ensure_column(conn, "snapshot_metrics", "fiscal_period", "TEXT")
         _ensure_column(conn, "snapshot_metrics", "period_type", "TEXT")
         _ensure_column(conn, "snapshot_metrics", "reported_date", "TEXT")
