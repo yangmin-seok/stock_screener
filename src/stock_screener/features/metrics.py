@@ -3,50 +3,18 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-CALC_VERSION = "v1.1"
+from stock_screener.features.fundamental_growth import GrowthResult, compute_growth_bundle
+
+CALC_VERSION = "v1.2"
 
 
-def _nearest_on_or_before(series: pd.Series, target: pd.Timestamp) -> float:
-    subset = series[series.index <= target]
-    if subset.empty:
-        return np.nan
-    return subset.iloc[-1]
-
-
-def _eps_growth_metrics(fund_hist: pd.DataFrame, ticker: str, asof_date: str) -> tuple[float, float]:
-    subset = fund_hist[fund_hist["ticker"] == ticker][["date", "eps"]].copy()
-    if subset.empty:
-        return np.nan, np.nan
-    subset["date"] = pd.to_datetime(subset["date"])
-    subset = subset.dropna(subset=["eps"]).sort_values("date")
-    if subset.empty:
-        return np.nan, np.nan
-
-    eps_series = pd.Series(subset["eps"].values, index=subset["date"])
-    asof_ts = pd.Timestamp(asof_date)
-    eps_now = _nearest_on_or_before(eps_series, asof_ts)
-
-    eps_5y_ago = _nearest_on_or_before(eps_series, asof_ts - pd.DateOffset(years=5))
-    if pd.notna(eps_now) and pd.notna(eps_5y_ago) and eps_now > 0 and eps_5y_ago > 0:
-        eps_cagr_5y = (eps_now / eps_5y_ago) ** (1 / 5) - 1
-    else:
-        eps_cagr_5y = np.nan
-
-    # Quarterly YoY approximation using latest available EPS on/before asof vs one year earlier.
-    latest_dt = eps_series.index[eps_series.index <= asof_ts]
-    if len(latest_dt) > 0:
-        ref_dt = latest_dt[-1]
-        prev_ref_dt = ref_dt - pd.DateOffset(years=1)
-        eps_q = _nearest_on_or_before(eps_series, ref_dt)
-        eps_q_prev = _nearest_on_or_before(eps_series, prev_ref_dt)
-        if pd.notna(eps_q) and pd.notna(eps_q_prev) and eps_q_prev != 0:
-            eps_yoy_q = eps_q / eps_q_prev - 1
-        else:
-            eps_yoy_q = np.nan
-    else:
-        eps_yoy_q = np.nan
-
-    return eps_cagr_5y, eps_yoy_q
+def _result_to_row(result: GrowthResult) -> dict[str, object]:
+    return {
+        "value": np.nan if result.value is None else result.value,
+        "window_years": result.window_years,
+        "asof": result.asof,
+        "sample_count": result.sample_count,
+    }
 
 
 def build_snapshot(
@@ -97,9 +65,29 @@ def build_snapshot(
     merged["turnover_20d"] = merged["avg_value_20d"] / merged["mcap"]
 
     growth = merged[["ticker"]].copy()
-    growth[["eps_cagr_5y", "eps_yoy_q"]] = growth["ticker"].apply(
-        lambda x: pd.Series(_eps_growth_metrics(fund_hist, x, asof_date))
-    )
+
+    def _growth_row(ticker: str) -> pd.Series:
+        bundle = compute_growth_bundle(fund_hist=fund_hist, ticker=ticker, asof=asof_date)
+        eps_5y = _result_to_row(bundle["eps_growth_past_5y"])
+        eps_yoy = _result_to_row(bundle["eps_growth_this_year_over_year"])
+        eps_ttm = _result_to_row(bundle["eps_growth_ttm"])
+        sales_qoq = _result_to_row(bundle["sales_growth_qtr_over_qtr"])
+        return pd.Series(
+            {
+                "eps_cagr_5y": eps_5y["value"],
+                "eps_yoy_q": eps_yoy["value"],
+                "eps_growth_ttm": eps_ttm["value"],
+                "sales_growth_qoq": sales_qoq["value"],
+                "eps_cagr_5y_window_years": eps_5y["window_years"],
+                "eps_cagr_5y_asof": eps_5y["asof"],
+                "eps_cagr_5y_sample_count": eps_5y["sample_count"],
+                "eps_yoy_q_window_years": eps_yoy["window_years"],
+                "eps_yoy_q_asof": eps_yoy["asof"],
+                "eps_yoy_q_sample_count": eps_yoy["sample_count"],
+            }
+        )
+
+    growth = pd.concat([growth, growth["ticker"].apply(_growth_row)], axis=1)
     merged = merged.merge(growth, on="ticker", how="left")
 
     merged["asof_date"] = asof_date
@@ -109,6 +97,8 @@ def build_snapshot(
         "asof_date", "ticker", "name", "market", "close", "mcap", "avg_value_20d", "current_value", "relative_value", "turnover_20d",
         "per", "pbr", "div", "dps", "eps", "bps", "reserve_ratio", "fiscal_period", "period_type", "reported_date", "consolidation_type", "financial_source", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
         "dist_sma20", "dist_sma50", "dist_sma200", "high_52w", "low_52w", "pos_52w", "near_52w_high_ratio",
-        "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_5y", "eps_yoy_q", "calc_version",
+        "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_5y", "eps_yoy_q", "eps_growth_ttm", "sales_growth_qoq",
+        "eps_cagr_5y_window_years", "eps_cagr_5y_asof", "eps_cagr_5y_sample_count",
+        "eps_yoy_q_window_years", "eps_yoy_q_asof", "eps_yoy_q_sample_count", "calc_version",
     ]
     return merged[cols]
