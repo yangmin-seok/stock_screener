@@ -5,6 +5,7 @@ from datetime import date, timedelta
 import logging
 from pathlib import Path
 import time
+from typing import Callable
 
 import pandas as pd
 
@@ -17,6 +18,10 @@ from stock_screener.storage.repository import Repository
 
 
 logger = logging.getLogger(__name__)
+
+
+class BatchCancelledError(RuntimeError):
+    """Raised when a batch run is cancelled at a safe checkpoint."""
 
 
 @dataclass
@@ -113,6 +118,8 @@ class DailyBatchPipeline:
         initial_backfill: bool = False,
         chunk_years: int = 2,
         chunks: int = 1,
+        rebuild_snapshot: bool = True,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> BatchResult:
         dt = pd.to_datetime(asof_date).date() if asof_date else self.collector.recent_business_day()
         asof_str = dt.strftime("%Y-%m-%d")
@@ -121,12 +128,13 @@ class DailyBatchPipeline:
         run_id = f"daily_batch:{asof_str}"
         checkpoint_key = f"fundamental_chunk:{asof_str}:{chunk_years}:{chunks}"
         logger.info(
-            "Starting daily batch: asof=%s, lookback_days=%s, initial_backfill=%s, chunk_years=%s, chunks=%s",
+            "Starting daily batch: asof=%s, lookback_days=%s, initial_backfill=%s, chunk_years=%s, chunks=%s, rebuild_snapshot=%s",
             asof_str,
             lookback_days,
             initial_backfill,
             chunk_years,
             chunks,
+            rebuild_snapshot,
         )
 
         tickers = self.collector.tickers()
@@ -195,7 +203,12 @@ class DailyBatchPipeline:
         start_chunk = int(saved_chunk) if saved_chunk and saved_chunk.isdigit() else 1
         start_chunk = min(max(start_chunk, 1), chunks)
 
+        chunks_done = 0
         for chunk_idx in range(start_chunk, chunks + 1):
+            if should_cancel and should_cancel():
+                logger.info("Daily batch cancel requested before chunk start: chunk=%s/%s", chunk_idx, chunks)
+                raise BatchCancelledError(f"Cancelled before chunk={chunk_idx}/{chunks}")
+
             chunk_start = dt - timedelta(days=chunk_years * 365 * chunk_idx)
             chunk_end = dt - timedelta(days=chunk_years * 365 * (chunk_idx - 1))
             chunk_from_dt = max(base_from_dt, chunk_start)
@@ -267,6 +280,7 @@ class DailyBatchPipeline:
                     chunk_to_dt,
                     chunk_rows,
                 )
+                chunks_done = chunk_idx
                 if chunk_idx < chunks:
                     self.repo.set_batch_checkpoint(checkpoint_key, str(chunk_idx + 1))
                 else:
@@ -282,19 +296,26 @@ class DailyBatchPipeline:
                 logger.error("Fundamental chunk failed: chunk=%s/%s, error=%s", chunk_idx, chunks, exc)
                 raise
 
-        price_window = self.repo.get_price_window(asof_str, window=lookback_days)
-        daily = self.repo.get_daily_join(asof_str)
-        fund_hist = self.repo.get_fundamental_window(asof_str, years=11)
-        snapshot = build_snapshot(price_window, daily, fund_hist, asof_str)
-        snap_rows = self.repo.replace_snapshot(asof_str, snapshot)
+        snap_rows = 0
+        snapshot_rebuilt = False
+        if rebuild_snapshot:
+            price_window = self.repo.get_price_window(asof_str, window=lookback_days)
+            daily = self.repo.get_daily_join(asof_str)
+            fund_hist = self.repo.get_fundamental_window(asof_str, years=11)
+            snapshot = build_snapshot(price_window, daily, fund_hist, asof_str)
+            snap_rows = self.repo.replace_snapshot(asof_str, snapshot)
+            snapshot_rebuilt = True
 
         logger.info(
-            "Daily batch completed: asof=%s, tickers=%s, prices=%s, cap=%s, fundamental=%s, snapshot=%s",
+            "Daily batch completed: asof=%s, tickers=%s, prices=%s, cap=%s, fundamental=%s, chunks_done=%s/%s, snapshot_rebuilt=%s, snapshot_rows=%s",
             asof_str,
             ticker_count,
             price_rows,
             cap_rows,
             fund_rows,
+            chunks_done,
+            chunks,
+            snapshot_rebuilt,
             snap_rows,
         )
 
