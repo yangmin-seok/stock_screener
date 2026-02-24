@@ -42,13 +42,28 @@ CREATE TABLE IF NOT EXISTS fundamental_daily (
     ticker TEXT NOT NULL,
     per REAL,
     pbr REAL,
-    eps REAL,
-    bps REAL,
     div REAL,
     dps REAL,
     reserve_ratio REAL,
     source_ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (date, ticker)
+);
+
+CREATE TABLE IF NOT EXISTS financials_daily (
+    date TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    fiscal_period TEXT,
+    period_type TEXT,
+    reported_date TEXT,
+    consolidation_type TEXT,
+    source TEXT,
+    revenue REAL,
+    operating_income REAL,
+    net_income REAL,
+    eps REAL,
+    bps REAL,
+    source_ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (date, ticker, fiscal_period, period_type, consolidation_type)
 );
 
 CREATE TABLE IF NOT EXISTS snapshot_metrics (
@@ -69,6 +84,11 @@ CREATE TABLE IF NOT EXISTS snapshot_metrics (
     eps REAL,
     bps REAL,
     reserve_ratio REAL,
+    fiscal_period TEXT,
+    period_type TEXT,
+    reported_date TEXT,
+    consolidation_type TEXT,
+    financial_source TEXT,
     roe_proxy REAL,
     eps_positive INTEGER,
     sma20 REAL,
@@ -108,6 +128,7 @@ CREATE TABLE IF NOT EXISTS job_log (
 CREATE INDEX IF NOT EXISTS idx_prices_ticker_date ON prices_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_cap_ticker_date ON cap_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_fund_ticker_date ON fundamental_daily(ticker, date);
+CREATE INDEX IF NOT EXISTS idx_fin_ticker_date ON financials_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_snapshot_asof ON snapshot_metrics(asof_date);
 """
 
@@ -129,12 +150,19 @@ def init_db(db_path: str | Path) -> None:
         conn.executescript(SCHEMA)
         _ensure_column(conn, "snapshot_metrics", "dps", "REAL")
         _ensure_column(conn, "fundamental_daily", "reserve_ratio", "REAL")
+        _ensure_column(conn, "fundamental_daily", "div", "REAL")
+        _ensure_column(conn, "fundamental_daily", "dps", "REAL")
         _ensure_column(conn, "snapshot_metrics", "reserve_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "current_value", "REAL")
         _ensure_column(conn, "snapshot_metrics", "relative_value", "REAL")
         _ensure_column(conn, "snapshot_metrics", "near_52w_high_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_yoy_q", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "fiscal_period", "TEXT")
+        _ensure_column(conn, "snapshot_metrics", "period_type", "TEXT")
+        _ensure_column(conn, "snapshot_metrics", "reported_date", "TEXT")
+        _ensure_column(conn, "snapshot_metrics", "consolidation_type", "TEXT")
+        _ensure_column(conn, "snapshot_metrics", "financial_source", "TEXT")
         conn.commit()
 
 
