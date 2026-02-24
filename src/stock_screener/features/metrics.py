@@ -52,8 +52,10 @@ def build_snapshot(
 
     merged = latest.merge(daily, how="left", on="ticker")
     merged["close"] = merged["close"].astype(float)
-    merged["roe_proxy"] = np.where((merged["bps"].fillna(0) > 0), merged["eps"] / merged["bps"], np.nan)
-    merged["eps_positive"] = (merged["eps"].fillna(0) > 0).astype(int)
+    eps_num = pd.to_numeric(merged["eps"], errors="coerce")
+    bps_num = pd.to_numeric(merged["bps"], errors="coerce")
+    merged["roe_proxy"] = np.where((bps_num > 0), eps_num / bps_num, np.nan)
+    merged["eps_positive"] = (eps_num > 0).fillna(False).astype(int)
     merged["dist_sma20"] = merged["close"] / merged["sma20"] - 1
     merged["dist_sma50"] = merged["close"] / merged["sma50"] - 1
     merged["dist_sma200"] = merged["close"] / merged["sma200"] - 1
