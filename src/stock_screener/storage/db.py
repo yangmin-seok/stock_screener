@@ -158,6 +158,8 @@ CREATE TABLE IF NOT EXISTS snapshot_metrics (
     current_ratio REAL,
     quick_ratio REAL,
     payout_ratio REAL,
+    foreign_net_buy_volume REAL,
+    foreign_net_buy_value REAL,
     eps_cagr_3y_window_years INTEGER,
     eps_cagr_3y_asof TEXT,
     eps_cagr_3y_sample_count INTEGER,
@@ -202,6 +204,16 @@ CREATE TABLE IF NOT EXISTS batch_checkpoint (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+
+CREATE TABLE IF NOT EXISTS investor_flow_daily (
+    date TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    foreign_net_buy_volume REAL,
+    foreign_net_buy_value REAL,
+    source_ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (date, ticker)
+);
+
 CREATE TABLE IF NOT EXISTS financial_quality_daily (
     asof_date TEXT NOT NULL,
     metric_date TEXT NOT NULL,
@@ -233,6 +245,7 @@ CREATE INDEX IF NOT EXISTS idx_prices_ticker_date ON prices_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_cap_ticker_date ON cap_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_fund_ticker_date ON fundamental_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_fin_ticker_date ON financials_daily(ticker, date);
+CREATE INDEX IF NOT EXISTS idx_investor_flow_ticker_date ON investor_flow_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_fin_periodic_ticker_period ON financials_periodic(ticker, fiscal_period);
 CREATE INDEX IF NOT EXISTS idx_snapshot_asof ON snapshot_metrics(asof_date);
 CREATE INDEX IF NOT EXISTS idx_fin_quality_asof_scope ON financial_quality_daily(asof_date, metric_scope);
@@ -323,11 +336,18 @@ def init_db(db_path: str | Path) -> None:
         _ensure_column(conn, "snapshot_metrics", "reported_date", "TEXT")
         _ensure_column(conn, "snapshot_metrics", "consolidation_type", "TEXT")
         _ensure_column(conn, "snapshot_metrics", "financial_source", "TEXT")
+        _ensure_column(conn, "investor_flow_daily", "foreign_net_buy_volume", "REAL")
+        _ensure_column(conn, "investor_flow_daily", "foreign_net_buy_value", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "foreign_net_buy_volume", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "foreign_net_buy_value", "REAL")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_fin_periodic_ticker_period ON financials_periodic(ticker, fiscal_period)"
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_fin_quality_asof_scope ON financial_quality_daily(asof_date, metric_scope)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_investor_flow_ticker_date ON investor_flow_daily(ticker, date)"
         )
         conn.commit()
 

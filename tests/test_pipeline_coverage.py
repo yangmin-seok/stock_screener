@@ -71,6 +71,11 @@ class _FakeCollector:
     def fundamental_market_metrics(self, dt):
         return pd.DataFrame([{"date": "2025-01-15", "ticker": "005930", "per": 1.0, "pbr": 1.0, "div": 0.0, "dps": 0.0}])
 
+    def foreign_investor_flow(self, dt):
+        return pd.DataFrame(
+            [{"date": "2025-01-15", "ticker": "005930", "foreign_net_buy_volume": None, "foreign_net_buy_value": 1000.0}]
+        )
+
 
 def test_daily_batch_financial_provider_order(monkeypatch, tmp_path):
     monkeypatch.setenv("DART_API_KEY", "dummy-key")
@@ -92,7 +97,7 @@ def test_daily_batch_keeps_dart_endpoint_unset_when_env_not_set(monkeypatch, tmp
     pipeline._ensure_dart_client()
 
     assert pipeline.dart_client is not None
-    assert pipeline.dart_client.endpoint is None
+    assert pipeline.dart_client.endpoint == "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json"
 
 
 def test_daily_batch_allows_dart_endpoint_override(monkeypatch, tmp_path):
@@ -208,8 +213,8 @@ def test_daily_batch_marks_chunk_cancelled_when_cancel_requested_mid_chunk(monke
 
     def should_cancel() -> bool:
         calls["count"] += 1
-        # price loop(1), cap loop(1), chunk precheck(1) 이후 fund-loop 체크에서 취소
-        return calls["count"] >= 4
+        # price loop(1), cap loop(1), investor-flow loop(1), chunk precheck(1) 이후 fund-loop 체크에서 취소
+        return calls["count"] >= 5
 
     with pytest.raises(BatchCancelledError):
         pipeline.run(
@@ -250,3 +255,27 @@ def test_daily_batch_honors_cancel_during_price_loop(monkeypatch, tmp_path):
             rebuild_snapshot=False,
             should_cancel=should_cancel,
         )
+
+
+def test_repository_upsert_investor_flow_roundtrip(tmp_path):
+    db = tmp_path / "flow.db"
+    init_db(db)
+    repo = Repository(db)
+
+    repo.upsert_tickers(pd.DataFrame([{"ticker": "005930", "name": "Samsung", "market": "KOSPI", "active_flag": 1}]))
+    repo.upsert_investor_flow(
+        pd.DataFrame(
+            [
+                {
+                    "date": "2025-01-15",
+                    "ticker": "005930",
+                    "foreign_net_buy_volume": None,
+                    "foreign_net_buy_value": 12345,
+                }
+            ]
+        )
+    )
+
+    joined = repo.get_daily_join("2025-01-15")
+    assert pd.isna(joined.loc[0, "foreign_net_buy_volume"])
+    assert joined.loc[0, "foreign_net_buy_value"] == 12345

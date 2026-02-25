@@ -140,6 +140,53 @@ class PykrxCollector:
         logger.debug("Collected market cap rows=%s for date=%s", len(frame), dt)
         return frame
 
+    @classmethod
+    def _normalize_foreign_investor_flow(cls, frame: pd.DataFrame, dt: date) -> pd.DataFrame:
+        if frame.empty:
+            return pd.DataFrame()
+
+        colmap: dict[str, list[str]] = {
+            "foreign_net_buy_volume": ["순매수거래량", "순매수수량", "순매수", "Net Buy Volume"],
+            "foreign_net_buy_value": ["순매수거래대금", "순매수대금", "Net Buy Value"],
+        }
+        out = frame.copy()
+        out.index.name = "ticker"
+        out = out.reset_index()
+
+        normalized = pd.DataFrame()
+        normalized["ticker"] = out["ticker"].astype(str)
+        for target, candidates in colmap.items():
+            src = cls._pick_column(out, candidates)
+            normalized[target] = pd.to_numeric(out[src], errors="coerce") if src is not None else pd.NA
+
+        normalized["date"] = dt.strftime("%Y-%m-%d")
+        return normalized[["date", "ticker", "foreign_net_buy_volume", "foreign_net_buy_value"]]
+
+    def foreign_investor_flow(self, dt: date) -> pd.DataFrame:
+        frames: list[pd.DataFrame] = []
+        for market in ("KOSPI", "KOSDAQ"):
+            raw = self._retry(
+                stock.get_market_net_purchases_of_equities_by_ticker,
+                self.fmt(dt),
+                self.fmt(dt),
+                market,
+                "외국인",
+            )
+            if raw.empty:
+                continue
+            normalized = self._normalize_foreign_investor_flow(raw, dt)
+            if not normalized.empty:
+                frames.append(normalized)
+
+        if not frames:
+            logger.debug("No foreign investor flow rows for date=%s", dt)
+            return pd.DataFrame(columns=["date", "ticker", "foreign_net_buy_volume", "foreign_net_buy_value"])
+
+        merged = pd.concat(frames, ignore_index=True)
+        merged = merged.drop_duplicates(subset=["date", "ticker"], keep="first")
+        logger.debug("Collected foreign investor flow rows=%s for date=%s", len(merged), dt)
+        return merged
+
     def fundamental_market_metrics(self, dt: date) -> pd.DataFrame:
         query_dt = dt
         frame = self._retry(stock.get_market_fundamental, self.fmt(query_dt), market="ALL")
