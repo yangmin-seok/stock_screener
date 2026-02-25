@@ -244,6 +244,7 @@ class DailyBatchPipeline:
                     financial_frame = self._safe_collect(self._collect_financials, fdt, label=f"financials:{fdt}")
                     upsert_rows = self.repo.upsert_fundamental(fund_frame)
                     upsert_rows += self.repo.upsert_financials(financial_frame, fdt.strftime("%Y-%m-%d"))
+                    upsert_rows += self.repo.upsert_financials_periodic(financial_frame)
                     fund_rows += upsert_rows
                     chunk_rows += upsert_rows
                     touched = set()

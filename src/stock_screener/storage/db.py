@@ -66,6 +66,25 @@ CREATE TABLE IF NOT EXISTS financials_daily (
     PRIMARY KEY (date, ticker, fiscal_period, period_type, consolidation_type)
 );
 
+-- financials_daily is kept as collection-time audit history.
+CREATE TABLE IF NOT EXISTS financials_periodic (
+    ticker TEXT NOT NULL,
+    fiscal_period TEXT NOT NULL,
+    period_type TEXT NOT NULL,
+    consolidation_type TEXT NOT NULL,
+    reported_date TEXT,
+    source TEXT,
+    revenue REAL,
+    operating_income REAL,
+    net_income REAL,
+    eps REAL,
+    bps REAL,
+    source_ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    is_correction INTEGER,
+    source_priority INTEGER,
+    PRIMARY KEY (ticker, fiscal_period, period_type, consolidation_type)
+);
+
 CREATE TABLE IF NOT EXISTS snapshot_metrics (
     asof_date TEXT NOT NULL,
     ticker TEXT NOT NULL,
@@ -153,6 +172,7 @@ CREATE INDEX IF NOT EXISTS idx_prices_ticker_date ON prices_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_cap_ticker_date ON cap_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_fund_ticker_date ON fundamental_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_fin_ticker_date ON financials_daily(ticker, date);
+CREATE INDEX IF NOT EXISTS idx_fin_periodic_ticker_period ON financials_periodic(ticker, fiscal_period);
 CREATE INDEX IF NOT EXISTS idx_snapshot_asof ON snapshot_metrics(asof_date);
 """
 
@@ -172,6 +192,16 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: 
 def init_db(db_path: str | Path) -> None:
     with get_connection(db_path) as conn:
         conn.executescript(SCHEMA)
+        _ensure_column(conn, "financials_periodic", "reported_date", "TEXT")
+        _ensure_column(conn, "financials_periodic", "source", "TEXT")
+        _ensure_column(conn, "financials_periodic", "revenue", "REAL")
+        _ensure_column(conn, "financials_periodic", "operating_income", "REAL")
+        _ensure_column(conn, "financials_periodic", "net_income", "REAL")
+        _ensure_column(conn, "financials_periodic", "eps", "REAL")
+        _ensure_column(conn, "financials_periodic", "bps", "REAL")
+        _ensure_column(conn, "financials_periodic", "source_ts", "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP")
+        _ensure_column(conn, "financials_periodic", "is_correction", "INTEGER")
+        _ensure_column(conn, "financials_periodic", "source_priority", "INTEGER")
         _ensure_column(conn, "snapshot_metrics", "dps", "REAL")
         _ensure_column(conn, "fundamental_daily", "reserve_ratio", "REAL")
         _ensure_column(conn, "fundamental_daily", "div", "REAL")
@@ -197,6 +227,9 @@ def init_db(db_path: str | Path) -> None:
         _ensure_column(conn, "snapshot_metrics", "reported_date", "TEXT")
         _ensure_column(conn, "snapshot_metrics", "consolidation_type", "TEXT")
         _ensure_column(conn, "snapshot_metrics", "financial_source", "TEXT")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_fin_periodic_ticker_period ON financials_periodic(ticker, fiscal_period)"
+        )
         conn.commit()
 
 
