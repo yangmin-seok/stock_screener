@@ -51,3 +51,25 @@ def test_period_type_guards_apply_to_growth_calculators():
     assert calc_ttm_growth(quarterly_series, asof="2024-01-01", period_type="annual").value is None
     assert calc_cagr(annual_series, asof="2024-01-01", window_years=1, period_type="quarterly").value is None
     assert calc_yoy(annual_series, asof="2024-01-01", period_type="quarterly").value is None
+
+
+def test_compute_growth_bundle_exposes_new_growth_keys_and_legacy_alias():
+    frame = pd.DataFrame(
+        [
+            {"ticker": "AAA", "fiscal_period": "2023Q1", "period_type": "quarterly", "consolidation_type": "C", "eps": 1.0, "revenue": 10.0},
+            {"ticker": "AAA", "fiscal_period": "2023Q2", "period_type": "quarterly", "consolidation_type": "C", "eps": 1.1, "revenue": 11.0},
+            {"ticker": "AAA", "fiscal_period": "2023Q3", "period_type": "quarterly", "consolidation_type": "C", "eps": 1.2, "revenue": 12.0},
+            {"ticker": "AAA", "fiscal_period": "2023Q4", "period_type": "quarterly", "consolidation_type": "C", "eps": 1.3, "revenue": 13.0},
+            {"ticker": "AAA", "fiscal_period": "2024Q1", "period_type": "quarterly", "consolidation_type": "C", "eps": 1.4, "revenue": 14.0},
+            {"ticker": "AAA", "fiscal_period": "2024Q2", "period_type": "quarterly", "consolidation_type": "C", "eps": 1.5, "revenue": 15.0},
+            {"ticker": "AAA", "fiscal_period": "2024Q3", "period_type": "quarterly", "consolidation_type": "C", "eps": 1.6, "revenue": 16.0},
+            {"ticker": "AAA", "fiscal_period": "2024Q4", "period_type": "quarterly", "consolidation_type": "C", "eps": 1.7, "revenue": 17.0},
+        ]
+    )
+
+    bundle = compute_growth_bundle(frame, ticker="AAA", asof="2025-01-01")
+
+    assert "eps_growth_qtr_over_qtr" in bundle
+    assert "sales_growth_ttm" in bundle
+    assert "sales_growth_past_5y" in bundle
+    assert bundle["eps_growth_this_year_over_year"] == bundle["eps_growth_qtr_over_qtr"]

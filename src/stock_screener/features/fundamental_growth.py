@@ -194,8 +194,11 @@ def compute_growth_bundle(fund_hist: pd.DataFrame, ticker: str, asof: str) -> di
     if subset.empty:
         return {
             "eps_growth_past_5y": GrowthResult(None, 5, asof, 0),
+            "eps_growth_qtr_over_qtr": GrowthResult(None, None, asof, 0),
             "sales_growth_qtr_over_qtr": GrowthResult(None, None, asof, 0),
             "eps_growth_ttm": GrowthResult(None, 1, asof, 0),
+            "sales_growth_ttm": GrowthResult(None, 1, asof, 0),
+            "sales_growth_past_5y": GrowthResult(None, 5, asof, 0),
             "eps_growth_this_year_over_year": GrowthResult(None, 1, asof, 0),
         }
 
@@ -205,11 +208,18 @@ def compute_growth_bundle(fund_hist: pd.DataFrame, ticker: str, asof: str) -> di
 
     eps_annual_series = _to_numeric_series(annual, "eps")
     eps_quarterly_series = _to_numeric_series(quarterly, "eps")
+    rev_annual_series = _to_numeric_series(annual, "revenue")
     rev_quarterly_series = _to_numeric_series(quarterly, "revenue")
+
+    eps_qoq = calc_qoq(eps_quarterly_series, asof=asof, period_type="quarterly")
 
     return {
         "eps_growth_past_5y": calc_cagr(eps_annual_series, asof=asof, window_years=5, period_type="annual"),
+        "eps_growth_qtr_over_qtr": eps_qoq,
         "sales_growth_qtr_over_qtr": calc_qoq(rev_quarterly_series, asof=asof, period_type="quarterly"),
         "eps_growth_ttm": calc_ttm_growth(eps_quarterly_series, asof=asof, period_type="quarterly"),
-        "eps_growth_this_year_over_year": calc_yoy(eps_annual_series, asof=asof, period_type="annual"),
+        "sales_growth_ttm": calc_ttm_growth(rev_quarterly_series, asof=asof, period_type="quarterly"),
+        "sales_growth_past_5y": calc_cagr(rev_annual_series, asof=asof, window_years=5, period_type="annual"),
+        # Backward-compatibility alias for existing snapshot/query/session keys.
+        "eps_growth_this_year_over_year": eps_qoq,
     }
