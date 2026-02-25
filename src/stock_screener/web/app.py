@@ -435,7 +435,7 @@ def _render_active_job_panel() -> None:
         return
 
     elapsed = int(time.time() - active_job["started_at"])
-    cancel_suffix = " | 취소 요청됨(현재 chunk 마무리 후 종료)" if active_job.get("cancel_requested") else ""
+    cancel_suffix = " | 취소 요청됨(다음 안전 체크포인트에서 중단)" if active_job.get("cancel_requested") else ""
     st.info(f"{active_job['label']} 실행 중... ({elapsed}초 경과){cancel_suffix}")
     c1, c2 = st.columns([1, 1])
     with c1:
@@ -451,7 +451,7 @@ def _render_active_job_panel() -> None:
             st.session_state.last_job_message = {
                 "status": "cancelled",
                 "job_type": active_job["job_type"],
-                "message": f"{active_job['label']} 취소 요청을 보냈습니다. 현재 chunk 완료 후 안전 중단됩니다.",
+                "message": f"{active_job['label']} 취소 요청을 보냈습니다. 다음 안전 체크포인트에서 중단됩니다.",
             }
             _safe_rerun()
 
@@ -1015,11 +1015,22 @@ with descriptive_tab:
         st.info("모멘텀 데이터가 없어 해당 필터를 비활성화했습니다.")
 
 with fundamental_tab:
-    apply_pbr_max = st.checkbox("최대 PBR 적용", key="apply_pbr_max")
-    pbr_max = st.number_input("최대 PBR", min_value=0.0, step=0.1, disabled=not apply_pbr_max, key="pbr_max")
+    st.caption("Finviz 스타일로 자주 쓰는 Fundamental 조건을 같은 그리드에 배치했습니다.")
 
-    apply_roe_min = st.checkbox("최소 ROE proxy 적용", key="apply_roe_min")
-    roe_min = st.number_input("최소 ROE proxy", step=0.01, disabled=not apply_roe_min, key="roe_min")
+    top_cols = st.columns(4)
+    with top_cols[0]:
+        apply_pbr_max = st.checkbox("최대 PBR 적용", key="apply_pbr_max")
+        pbr_max = st.number_input("최대 PBR", min_value=0.0, step=0.1, disabled=not apply_pbr_max, key="pbr_max")
+    with top_cols[1]:
+        apply_roe_min = st.checkbox("최소 ROE proxy 적용", key="apply_roe_min")
+        roe_min = st.number_input("최소 ROE proxy", step=0.01, disabled=not apply_roe_min, key="roe_min")
+    with top_cols[2]:
+        apply_reserve_ratio_min = st.checkbox("최소 유보율(%) 적용", key="apply_reserve_ratio_min")
+        reserve_ratio_min = st.number_input(
+            "최소 유보율(%)", step=50.0, disabled=not apply_reserve_ratio_min, key="reserve_ratio_min"
+        )
+    with top_cols[3]:
+        apply_eps_positive = st.checkbox("EPS 흑자 기업만(적자 제외)", key="apply_eps_positive")
 
     if not fundamental_metric_availability["ev_ebitda"]:
         st.session_state.ev_ebitda_filter_mode = "Any"
@@ -1039,106 +1050,107 @@ with fundamental_tab:
     if not fundamental_metric_availability["ev_ebitda"]:
         st.info("EV/EBITDA 데이터 결측 비중이 높아 해당 필터를 Any로 전환했습니다.")
 
-    apply_eps_positive = st.checkbox("EPS 흑자 기업만(적자 제외)", key="apply_eps_positive")
-
-    apply_reserve_ratio_min = st.checkbox("최소 유보율(%) 적용", key="apply_reserve_ratio_min")
-    reserve_ratio_min = st.number_input(
-        "최소 유보율(%)", step=50.0, disabled=not apply_reserve_ratio_min, key="reserve_ratio_min"
-    )
-
     if not fundamental_metric_availability["eps_cagr_5y"]:
         st.session_state.apply_eps_cagr_5y = False
-    apply_eps_cagr_5y = st.checkbox(
-        "최근 5년 EPS CAGR 조건 적용",
-        key="apply_eps_cagr_5y",
-        disabled=not fundamental_metric_availability["eps_cagr_5y"],
-    )
-    eps_cagr_5y_min = st.number_input(
-        "최근 5년 EPS CAGR 최소",
-        step=0.01,
-        format="%.2f",
-        disabled=not apply_eps_cagr_5y,
-        key="eps_cagr_5y_min",
-    )
-
     if not fundamental_metric_availability["eps_yoy_q"]:
         st.session_state.apply_eps_yoy_q = False
-    apply_eps_yoy_q = st.checkbox(
-        "최근 분기 EPS YoY 조건 적용(호환키)",
-        key="apply_eps_yoy_q",
-        disabled=not fundamental_metric_availability["eps_yoy_q"],
-        help="기존 query/session 키 호환을 위해 유지되며, 값은 분기 EPS 성장률(Q/Q)과 동일하게 계산됩니다.",
-    )
-    eps_yoy_q_min = st.number_input(
-        "최근 분기 EPS YoY 최소",
-        step=0.01,
-        format="%.2f",
-        disabled=not apply_eps_yoy_q,
-        key="eps_yoy_q_min",
-    )
-
     if not fundamental_metric_availability["eps_qoq"]:
         st.session_state.apply_eps_qoq = False
-    apply_eps_qoq = st.checkbox(
-        "최근 분기 EPS Q/Q 조건 적용",
-        key="apply_eps_qoq",
-        disabled=not fundamental_metric_availability["eps_qoq"],
-    )
-    eps_qoq_min = st.number_input(
-        "최근 분기 EPS Q/Q 최소",
-        step=0.01,
-        format="%.2f",
-        disabled=not apply_eps_qoq,
-        key="eps_qoq_min",
-    )
-
     if not fundamental_metric_availability["sales_growth_qoq"]:
         st.session_state.apply_sales_growth_qoq = False
-    apply_sales_growth_qoq = st.checkbox(
-        "최근 분기 Sales Q/Q 조건 적용",
-        key="apply_sales_growth_qoq",
-        disabled=not fundamental_metric_availability["sales_growth_qoq"],
-    )
-    sales_growth_qoq_min = st.number_input(
-        "최근 분기 Sales Q/Q 최소",
-        step=0.01,
-        format="%.2f",
-        disabled=not apply_sales_growth_qoq,
-        key="sales_growth_qoq_min",
-    )
-
     if not fundamental_metric_availability["sales_growth_ttm"]:
         st.session_state.apply_sales_growth_ttm = False
-    apply_sales_growth_ttm = st.checkbox(
-        "Sales TTM 성장률 조건 적용",
-        key="apply_sales_growth_ttm",
-        disabled=not fundamental_metric_availability["sales_growth_ttm"],
-    )
-    sales_growth_ttm_min = st.number_input(
-        "Sales TTM 성장률 최소",
-        step=0.01,
-        format="%.2f",
-        disabled=not apply_sales_growth_ttm,
-        key="sales_growth_ttm_min",
-    )
-
     if not fundamental_metric_availability["sales_cagr_5y"]:
         st.session_state.apply_sales_cagr_5y = False
-    apply_sales_cagr_5y = st.checkbox(
-        "최근 5년 Sales CAGR 조건 적용",
-        key="apply_sales_cagr_5y",
-        disabled=not fundamental_metric_availability["sales_cagr_5y"],
-    )
-    sales_cagr_5y_min = st.number_input(
-        "최근 5년 Sales CAGR 최소",
-        step=0.01,
-        format="%.2f",
-        disabled=not apply_sales_cagr_5y,
-        key="sales_cagr_5y_min",
-    )
 
-    apply_has_price_5y = st.checkbox("가격 데이터 5Y 커버리지 종목만", key="apply_has_price_5y")
-    apply_has_price_10y = st.checkbox("가격 데이터 10Y 커버리지 종목만", key="apply_has_price_10y")
+    growth_cols = st.columns(3)
+    with growth_cols[0]:
+        apply_eps_cagr_5y = st.checkbox(
+            "최근 5년 EPS CAGR 조건 적용",
+            key="apply_eps_cagr_5y",
+            disabled=not fundamental_metric_availability["eps_cagr_5y"],
+        )
+        eps_cagr_5y_min = st.number_input(
+            "최근 5년 EPS CAGR 최소",
+            step=0.01,
+            format="%.2f",
+            disabled=not apply_eps_cagr_5y,
+            key="eps_cagr_5y_min",
+        )
+
+        apply_sales_growth_qoq = st.checkbox(
+            "최근 분기 Sales Q/Q 조건 적용",
+            key="apply_sales_growth_qoq",
+            disabled=not fundamental_metric_availability["sales_growth_qoq"],
+        )
+        sales_growth_qoq_min = st.number_input(
+            "최근 분기 Sales Q/Q 최소",
+            step=0.01,
+            format="%.2f",
+            disabled=not apply_sales_growth_qoq,
+            key="sales_growth_qoq_min",
+        )
+
+    with growth_cols[1]:
+        apply_eps_yoy_q = st.checkbox(
+            "최근 분기 EPS YoY 조건 적용(호환키)",
+            key="apply_eps_yoy_q",
+            disabled=not fundamental_metric_availability["eps_yoy_q"],
+            help="기존 query/session 키 호환을 위해 유지되며, 값은 분기 EPS 성장률(Q/Q)과 동일하게 계산됩니다.",
+        )
+        eps_yoy_q_min = st.number_input(
+            "최근 분기 EPS YoY 최소",
+            step=0.01,
+            format="%.2f",
+            disabled=not apply_eps_yoy_q,
+            key="eps_yoy_q_min",
+        )
+
+        apply_sales_growth_ttm = st.checkbox(
+            "Sales TTM 성장률 조건 적용",
+            key="apply_sales_growth_ttm",
+            disabled=not fundamental_metric_availability["sales_growth_ttm"],
+        )
+        sales_growth_ttm_min = st.number_input(
+            "Sales TTM 성장률 최소",
+            step=0.01,
+            format="%.2f",
+            disabled=not apply_sales_growth_ttm,
+            key="sales_growth_ttm_min",
+        )
+
+    with growth_cols[2]:
+        apply_eps_qoq = st.checkbox(
+            "최근 분기 EPS Q/Q 조건 적용",
+            key="apply_eps_qoq",
+            disabled=not fundamental_metric_availability["eps_qoq"],
+        )
+        eps_qoq_min = st.number_input(
+            "최근 분기 EPS Q/Q 최소",
+            step=0.01,
+            format="%.2f",
+            disabled=not apply_eps_qoq,
+            key="eps_qoq_min",
+        )
+
+        apply_sales_cagr_5y = st.checkbox(
+            "최근 5년 Sales CAGR 조건 적용",
+            key="apply_sales_cagr_5y",
+            disabled=not fundamental_metric_availability["sales_cagr_5y"],
+        )
+        sales_cagr_5y_min = st.number_input(
+            "최근 5년 Sales CAGR 최소",
+            step=0.01,
+            format="%.2f",
+            disabled=not apply_sales_cagr_5y,
+            key="sales_cagr_5y_min",
+        )
+
+    coverage_cols = st.columns(2)
+    with coverage_cols[0]:
+        apply_has_price_5y = st.checkbox("가격 데이터 5Y 커버리지 종목만", key="apply_has_price_5y")
+    with coverage_cols[1]:
+        apply_has_price_10y = st.checkbox("가격 데이터 10Y 커버리지 종목만", key="apply_has_price_10y")
 
 with technical_tab:
     above_200ma = st.checkbox("200일선 위 조건 적용", key="above_200ma")

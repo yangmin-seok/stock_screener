@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from stock_screener.features.metrics import build_snapshot
 from stock_screener.storage.db import init_db
@@ -35,7 +36,7 @@ def test_collection_checkpoint_roundtrip(tmp_path):
     assert checkpoint["last_fundamental_date"] == "2024-01-31"
 import sqlite3
 
-from stock_screener.pipelines.daily_batch import DailyBatchPipeline
+from stock_screener.pipelines.daily_batch import BatchCancelledError, DailyBatchPipeline
 
 
 class _FakeCollector:
@@ -194,3 +195,58 @@ def test_daily_batch_clamps_future_latest_fundamental_date(monkeypatch, tmp_path
             ("daily_batch:2025-01-15", "fundamental_chunk_1"),
         ).fetchone()[0]
     assert status == "success"
+
+
+def test_daily_batch_marks_chunk_cancelled_when_cancel_requested_mid_chunk(monkeypatch, tmp_path):
+    monkeypatch.setenv("DART_API_KEY", "dummy-key")
+    pipeline = DailyBatchPipeline(tmp_path / "x.db")
+    pipeline.collector = _FakeCollector()
+
+    monkeypatch.setattr(pipeline, "_collect_financials", lambda dt, **kwargs: pd.DataFrame())
+
+    calls = {"count": 0}
+
+    def should_cancel() -> bool:
+        calls["count"] += 1
+        # price loop(1), cap loop(1), chunk precheck(1) 이후 fund-loop 체크에서 취소
+        return calls["count"] >= 4
+
+    with pytest.raises(BatchCancelledError):
+        pipeline.run(
+            asof_date="2025-01-15",
+            lookback_days=5,
+            initial_backfill=False,
+            chunk_years=1,
+            chunks=1,
+            rebuild_snapshot=False,
+            should_cancel=should_cancel,
+        )
+
+    with sqlite3.connect(tmp_path / "x.db") as conn:
+        row = conn.execute(
+            "SELECT status, message FROM job_log WHERE run_id = ? AND stage = ?",
+            ("daily_batch:2025-01-15", "fundamental_chunk_1"),
+        ).fetchone()
+
+    assert row[0] == "cancelled"
+    assert "cancelled=" in row[1]
+
+
+def test_daily_batch_honors_cancel_during_price_loop(monkeypatch, tmp_path):
+    monkeypatch.setenv("DART_API_KEY", "dummy-key")
+    pipeline = DailyBatchPipeline(tmp_path / "x.db")
+    pipeline.collector = _FakeCollector()
+
+    def should_cancel() -> bool:
+        return True
+
+    with pytest.raises(BatchCancelledError):
+        pipeline.run(
+            asof_date="2025-01-15",
+            lookback_days=5,
+            initial_backfill=False,
+            chunk_years=1,
+            chunks=1,
+            rebuild_snapshot=False,
+            should_cancel=should_cancel,
+        )
