@@ -72,6 +72,10 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("pbr_max", "float", 1.0),
     FilterSpec("apply_roe_min", "bool", False),
     FilterSpec("roe_min", "float", 0.1),
+    FilterSpec("ev_ebitda_filter_mode", "str", "Any"),
+    FilterSpec("ev_ebitda_bucket", "str", "전체"),
+    FilterSpec("ev_ebitda_min_custom", "float", 0.0),
+    FilterSpec("ev_ebitda_max_custom", "float", 0.0),
     FilterSpec("apply_eps_positive", "bool", False),
     FilterSpec("apply_reserve_ratio_min", "bool", False),
     FilterSpec("reserve_ratio_min", "float", 500.0),
@@ -167,6 +171,15 @@ MOMENTUM_BUCKETS: dict[str, tuple[float | None, float | None]] = {
     "+10% 이상": (0.1, None),
     "+20% 이상": (0.2, None),
     "+50% 이상": (0.5, None),
+}
+
+EV_EBITDA_MODES = ("Any", "구간 선택", "직접 입력")
+EV_EBITDA_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "5x 이하": (None, 5.0),
+    "10x 이하": (None, 10.0),
+    "10x~20x": (10.0, 20.0),
+    "20x 이상": (20.0, None),
 }
 
 
@@ -651,6 +664,9 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("momentum_filter_mode") not in MOMENTUM_MODES:
         st.session_state.momentum_filter_mode = "Any"
         st.session_state.query_parse_errors.append("momentum_filter_mode")
+    if st.session_state.get("ev_ebitda_filter_mode") not in EV_EBITDA_MODES:
+        st.session_state.ev_ebitda_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("ev_ebitda_filter_mode")
 
     if st.session_state.get("mcap_bucket") not in MCAP_BUCKETS:
         st.session_state.mcap_bucket = "전체"
@@ -670,6 +686,9 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("momentum_bucket") not in MOMENTUM_BUCKETS:
         st.session_state.momentum_bucket = "전체"
         st.session_state.query_parse_errors.append("momentum_bucket")
+    if st.session_state.get("ev_ebitda_bucket") not in EV_EBITDA_BUCKETS:
+        st.session_state.ev_ebitda_bucket = "전체"
+        st.session_state.query_parse_errors.append("ev_ebitda_bucket")
     if st.session_state.get("momentum_metric") not in MOMENTUM_METRICS:
         st.session_state.momentum_metric = "ret_3m"
         st.session_state.query_parse_errors.append("momentum_metric")
@@ -694,6 +713,8 @@ if st.session_state.get("relvol_filter_mode") not in RELVOL_MODES:
     st.session_state.relvol_filter_mode = "Any"
 if st.session_state.get("momentum_filter_mode") not in MOMENTUM_MODES:
     st.session_state.momentum_filter_mode = "Any"
+if st.session_state.get("ev_ebitda_filter_mode") not in EV_EBITDA_MODES:
+    st.session_state.ev_ebitda_filter_mode = "Any"
 
 if st.session_state.get("mcap_bucket") not in MCAP_BUCKETS:
     st.session_state.mcap_bucket = "전체"
@@ -707,6 +728,8 @@ if st.session_state.get("relvol_bucket") not in RELVOL_BUCKETS:
     st.session_state.relvol_bucket = "전체"
 if st.session_state.get("momentum_bucket") not in MOMENTUM_BUCKETS:
     st.session_state.momentum_bucket = "전체"
+if st.session_state.get("ev_ebitda_bucket") not in EV_EBITDA_BUCKETS:
+    st.session_state.ev_ebitda_bucket = "전체"
 if st.session_state.get("momentum_metric") not in MOMENTUM_METRICS:
     st.session_state.momentum_metric = "ret_3m"
 
@@ -849,6 +872,7 @@ fundamental_metric_availability = {
     "sales_growth_qoq": "sales_growth_qoq" in base.columns and base["sales_growth_qoq"].notna().any(),
     "sales_growth_ttm": "sales_growth_ttm" in base.columns and base["sales_growth_ttm"].notna().any(),
     "sales_cagr_5y": "sales_cagr_5y" in base.columns and base["sales_cagr_5y"].notna().any(),
+    "ev_ebitda": "ev_ebitda" in base.columns and base["ev_ebitda"].notna().any(),
 }
 
 def _active_filter_count_from_state() -> int:
@@ -866,6 +890,7 @@ def _active_filter_count_from_state() -> int:
             int(bool(st.session_state.get("apply_reserve_ratio_min", False))),
             int(bool(st.session_state.get("apply_roe_min", False))),
             int(bool(st.session_state.get("apply_eps_positive", False))),
+            int(fundamental_metric_availability["ev_ebitda"] and st.session_state.get("ev_ebitda_filter_mode", "Any") != "Any"),
             int(bool(st.session_state.get("above_200ma", False))),
             int(bool(st.session_state.get("apply_eps_cagr_5y", False))),
             int(bool(st.session_state.get("apply_eps_yoy_q", False))),
@@ -994,6 +1019,24 @@ with fundamental_tab:
 
     apply_roe_min = st.checkbox("최소 ROE proxy 적용", key="apply_roe_min")
     roe_min = st.number_input("최소 ROE proxy", step=0.01, disabled=not apply_roe_min, key="roe_min")
+
+    ev_ebitda_filter_mode, ev_ebitda_bucket, ev_ebitda_min_custom, ev_ebitda_max_custom = _render_descriptive_range_filter(
+        title="EV/EBITDA",
+        mode_key="ev_ebitda_filter_mode",
+        mode_options=EV_EBITDA_MODES,
+        bucket_key="ev_ebitda_bucket",
+        bucket_options=EV_EBITDA_BUCKETS,
+        min_key="ev_ebitda_min_custom",
+        max_key="ev_ebitda_max_custom",
+        step=0.5,
+        unit_help="단위: x",
+        mode_help="ev_ebitda가 결측인 경우 필터를 Any로 강제합니다.",
+        row_disabled=not fundamental_metric_availability["ev_ebitda"],
+    )
+    if not fundamental_metric_availability["ev_ebitda"]:
+        st.session_state.ev_ebitda_filter_mode = "Any"
+        ev_ebitda_filter_mode = "Any"
+        st.info("EV/EBITDA 데이터 결측 비중이 높아 해당 필터를 Any로 전환했습니다.")
 
     apply_eps_positive = st.checkbox("EPS 흑자 기업만(적자 제외)", key="apply_eps_positive")
 
@@ -1209,6 +1252,19 @@ if apply_roe_min:
     filtered = filtered[(filtered["roe_proxy"].notna()) & (filtered["roe_proxy"] >= roe_min)]
 if apply_eps_positive:
     filtered = filtered[filtered["eps_positive"] == 1]
+if fundamental_metric_availability["ev_ebitda"] and ev_ebitda_filter_mode == "구간 선택":
+    ev_ebitda_min, ev_ebitda_max = EV_EBITDA_BUCKETS.get(ev_ebitda_bucket, (None, None))
+    filtered = filtered[filtered["ev_ebitda"].notna()]
+    if ev_ebitda_min is not None:
+        filtered = filtered[filtered["ev_ebitda"] >= ev_ebitda_min]
+    if ev_ebitda_max is not None:
+        filtered = filtered[filtered["ev_ebitda"] <= ev_ebitda_max]
+elif fundamental_metric_availability["ev_ebitda"] and ev_ebitda_filter_mode == "직접 입력":
+    filtered = filtered[filtered["ev_ebitda"].notna()]
+    if ev_ebitda_min_custom != 0:
+        filtered = filtered[filtered["ev_ebitda"] >= ev_ebitda_min_custom]
+    if ev_ebitda_max_custom != 0:
+        filtered = filtered[filtered["ev_ebitda"] <= ev_ebitda_max_custom]
 if above_200ma:
     filtered = filtered[filtered["dist_sma200"] >= 0]
 if apply_eps_cagr_5y:
@@ -1234,7 +1290,7 @@ sort_col = st.selectbox(
     "정렬 컬럼",
     [
         "mcap", "pbr", "reserve_ratio", "roe_proxy", "ret_3m", "ret_6m", "ret_1y", "near_52w_high_ratio", "div",
-        "avg_value_20d", "current_value", "relative_value", "eps_cagr_5y", "eps_yoy_q", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y",
+        "avg_value_20d", "current_value", "relative_value", "ev_ebitda", "eps_cagr_5y", "eps_yoy_q", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y",
     ],
     key="sort_col",
 )
@@ -1285,6 +1341,12 @@ if momentum_filter_mode != "구간 선택":
 if momentum_filter_mode == "Any":
     query_filter_state.pop("momentum_metric", None)
 
+if ev_ebitda_filter_mode != "직접 입력":
+    query_filter_state.pop("ev_ebitda_min_custom", None)
+    query_filter_state.pop("ev_ebitda_max_custom", None)
+if ev_ebitda_filter_mode != "구간 선택":
+    query_filter_state.pop("ev_ebitda_bucket", None)
+
 _set_query_params(query_filter_state)
 
 share_query_string = urlencode(query_filter_state, doseq=True)
@@ -1325,6 +1387,10 @@ if relative_value_available and relvol_filter_mode != "Any":
 if momentum_available and momentum_filter_mode != "Any":
     condition_summaries.append(
         f"{MOMENTUM_METRICS.get(momentum_metric, momentum_metric)} {_format_range_summary(momentum_filter_mode, momentum_bucket, momentum_min_custom, momentum_max_custom)}"
+    )
+if fundamental_metric_availability["ev_ebitda"] and ev_ebitda_filter_mode != "Any":
+    condition_summaries.append(
+        f"EV/EBITDA {_format_range_summary(ev_ebitda_filter_mode, ev_ebitda_bucket, ev_ebitda_min_custom, ev_ebitda_max_custom)}"
     )
 if st.session_state.get("apply_eps_qoq"):
     condition_summaries.append(f"EPS Q/Q ≥ {st.session_state.get('eps_qoq_min', 0):.2f}")
