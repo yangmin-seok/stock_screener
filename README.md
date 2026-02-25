@@ -56,8 +56,8 @@ streamlit run src/stock_screener/web/app.py
 python -m stock_screener.cli --db-path data/screener.db
 ```
 
-## 테스트 실행 (로컬/CI 공통)
-아래 명령을 표준으로 사용합니다.
+## 로컬 테스트 실행
+아래 명령을 로컬 표준으로 사용합니다.
 
 ```bash
 PYTHONPATH=src python -m pytest -q
