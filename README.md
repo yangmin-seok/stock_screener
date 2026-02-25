@@ -56,6 +56,24 @@ streamlit run src/stock_screener/web/app.py
 python -m stock_screener.cli --db-path data/screener.db
 ```
 
+## 수집 현황 확인
+- 최근 `daily_batch:*` 실행의 청크별 성공/실패, `row_count`, 품질 지표(`eps_non_null`, `bps_non_null`, `revenue_non_null`)를 확인할 수 있습니다.
+- 가능하면 message 내 분모(`metric_total` 또는 `metric=x/y`)를 사용하고, 분모가 없으면 `row_count`를 분모로 사용해 비율을 계산합니다.
+
+```bash
+python -m stock_screener.cli --db-path data/screener.db --report-latest-batch
+```
+
+예시 출력:
+
+```text
+Latest run_id: daily_batch:2026-02-20
+chunk | status  | row_count | eps_non_null          | bps_non_null          | revenue_non_null      | message
+------|---------|-----------|------------------------|-----------------------|-----------------------|--------
+1/2   | success |       120 | 80/120 (66.7%)        | 70/120 (58.3%)        | 90/120 (75.0%)        | chunk=1/2, ...
+2/2   | failed  |       100 | 40/100 (40.0%)        | 50/100 (50.0%)        | 60/100 (60.0%)        | chunk=2/2, ...
+```
+
 ## 로컬 테스트 실행
 아래 명령을 로컬 표준으로 사용합니다.
 
