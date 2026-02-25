@@ -55,9 +55,10 @@ class DailyBatchPipeline:
         if self.dart_client is not None:
             return
         dart_api_key = get_required_env("DART_API_KEY")
+        endpoint_override = os.environ.get("DART_FINANCIALS_ENDPOINT")
         self.dart_client = DartClient(
             api_key=dart_api_key,
-            endpoint=(os.environ.get("DART_FINANCIALS_ENDPOINT") or None),
+            endpoint=endpoint_override if endpoint_override else DartClient.endpoint,
         )
         self.financial_providers = [
             DartFinancialProvider(self.dart_client),

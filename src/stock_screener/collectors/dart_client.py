@@ -8,10 +8,13 @@ from urllib.parse import urlencode
 from urllib.request import urlopen
 
 
+DART_SINGLE_COMPANY_ALL_ACCOUNTS_ENDPOINT = "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json"
+
+
 @dataclass(frozen=True)
 class DartClient:
     api_key: str
-    endpoint: str | None = None
+    endpoint: str | None = DART_SINGLE_COMPANY_ALL_ACCOUNTS_ENDPOINT
     timeout_s: float = 10.0
     default_params: dict[str, str] = field(default_factory=dict)
 
@@ -19,11 +22,8 @@ class DartClient:
         """Fetch raw DART financial payload for an anchor date.
 
         This client is intentionally lightweight and returns an empty payload
-        when endpoint wiring is not configured.
+        when the endpoint response does not include a list payload.
         """
-
-        if not self.endpoint:
-            return []
 
         params = {
             "crtfc_key": self.api_key,
@@ -31,6 +31,8 @@ class DartClient:
             **self.default_params,
         }
         query = urlencode(params)
+        if not self.endpoint:
+            return []
         with urlopen(f"{self.endpoint}?{query}", timeout=self.timeout_s) as response:  # noqa: S310
             payload = json.loads(response.read().decode("utf-8"))
 
