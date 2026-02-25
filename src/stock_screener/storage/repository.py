@@ -434,10 +434,10 @@ class Repository:
                 "asof_date", "ticker", "name", "market", "close", "mcap", "avg_value_20d", "current_value", "relative_value", "turnover_20d",
                 "per", "pbr", "div", "dps", "eps", "bps", "reserve_ratio", "fiscal_period", "period_type", "reported_date", "consolidation_type", "financial_source", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
                 "dist_sma20", "dist_sma50", "dist_sma200", "high_52w", "low_52w", "pos_52w", "near_52w_high_ratio",
-                "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_3y", "eps_cagr_5y", "eps_yoy_q", "eps_growth_ttm", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_3y", "sales_cagr_5y",
+                "vol_20d", "rsi_14", "atr_14", "gap_pct", "chg_from_open_pct", "volatility_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_3y", "eps_cagr_5y", "eps_yoy_q", "eps_growth_ttm", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_3y", "sales_cagr_5y",
                 "pe_ratio", "forward_pe", "ps_ratio", "pb_ratio", "peg_ratio", "ps", "peg", "ev", "ev_sales", "ev_ebitda",
                 "gross_margin", "operating_margin", "net_margin", "roa", "roe", "roic",
-                "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio", "foreign_net_buy_volume", "foreign_net_buy_value",
+                "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio", "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_ratio", "foreign_net_buy_value",
                 "eps_cagr_3y_window_years", "eps_cagr_3y_asof", "eps_cagr_3y_sample_count", "eps_cagr_5y_window_years", "eps_cagr_5y_asof", "eps_cagr_5y_sample_count", "eps_yoy_q_window_years", "eps_yoy_q_asof", "eps_yoy_q_sample_count", "sales_cagr_3y_window_years", "sales_cagr_3y_asof", "sales_cagr_3y_sample_count", "has_price_5y", "has_price_10y", "calc_version",
             ]
             rows = self._to_sql_records(frame, cols)
@@ -448,10 +448,10 @@ class Repository:
                     asof_date, ticker, name, market, close, mcap, avg_value_20d, current_value, relative_value, turnover_20d,
                     per, pbr, div, dps, eps, bps, reserve_ratio, fiscal_period, period_type, reported_date, consolidation_type, financial_source, roe_proxy, eps_positive, sma20, sma50, sma200,
                     dist_sma20, dist_sma50, dist_sma200, high_52w, low_52w, pos_52w, near_52w_high_ratio,
-                    vol_20d, ret_1w, ret_1m, ret_3m, ret_6m, ret_1y, eps_cagr_3y, eps_cagr_5y, eps_yoy_q, eps_growth_ttm, eps_qoq, sales_growth_qoq, sales_growth_ttm, sales_cagr_3y, sales_cagr_5y,
+                    vol_20d, rsi_14, atr_14, gap_pct, chg_from_open_pct, volatility_20d, ret_1w, ret_1m, ret_3m, ret_6m, ret_1y, eps_cagr_3y, eps_cagr_5y, eps_yoy_q, eps_growth_ttm, eps_qoq, sales_growth_qoq, sales_growth_ttm, sales_cagr_3y, sales_cagr_5y,
                     pe_ratio, forward_pe, ps_ratio, pb_ratio, peg_ratio, ps, peg, ev, ev_sales, ev_ebitda,
                     gross_margin, operating_margin, net_margin, roa, roe, roic,
-                    debt_equity, lt_debt_equity, current_ratio, quick_ratio, payout_ratio, foreign_net_buy_volume, foreign_net_buy_value,
+                    debt_equity, lt_debt_equity, current_ratio, quick_ratio, payout_ratio, foreign_net_buy_volume, foreign_net_buy_volume_20d, foreign_net_buy_ratio, foreign_net_buy_value,
                     eps_cagr_3y_window_years, eps_cagr_3y_asof, eps_cagr_3y_sample_count, eps_cagr_5y_window_years, eps_cagr_5y_asof, eps_cagr_5y_sample_count, eps_yoy_q_window_years, eps_yoy_q_asof, eps_yoy_q_sample_count, sales_cagr_3y_window_years, sales_cagr_3y_asof, sales_cagr_3y_sample_count, has_price_5y, has_price_10y, calc_version
                 ) VALUES ({placeholders})
                 """,

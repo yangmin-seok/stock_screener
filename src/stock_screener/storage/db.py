@@ -123,6 +123,11 @@ CREATE TABLE IF NOT EXISTS snapshot_metrics (
     pos_52w REAL,
     near_52w_high_ratio REAL,
     vol_20d REAL,
+    rsi_14 REAL,
+    atr_14 REAL,
+    gap_pct REAL,
+    chg_from_open_pct REAL,
+    volatility_20d REAL,
     ret_1w REAL,
     ret_1m REAL,
     ret_3m REAL,
@@ -159,6 +164,8 @@ CREATE TABLE IF NOT EXISTS snapshot_metrics (
     quick_ratio REAL,
     payout_ratio REAL,
     foreign_net_buy_volume REAL,
+    foreign_net_buy_volume_20d REAL,
+    foreign_net_buy_ratio REAL,
     foreign_net_buy_value REAL,
     eps_cagr_3y_window_years INTEGER,
     eps_cagr_3y_asof TEXT,
@@ -317,6 +324,11 @@ def init_db(db_path: str | Path) -> None:
         _ensure_column(conn, "snapshot_metrics", "current_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "quick_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "payout_ratio", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "rsi_14", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "atr_14", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "gap_pct", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "chg_from_open_pct", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "volatility_20d", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_cagr_3y_window_years", "INTEGER")
         _ensure_column(conn, "snapshot_metrics", "eps_cagr_3y_asof", "TEXT")
         _ensure_column(conn, "snapshot_metrics", "eps_cagr_3y_sample_count", "INTEGER")
@@ -339,6 +351,8 @@ def init_db(db_path: str | Path) -> None:
         _ensure_column(conn, "investor_flow_daily", "foreign_net_buy_volume", "REAL")
         _ensure_column(conn, "investor_flow_daily", "foreign_net_buy_value", "REAL")
         _ensure_column(conn, "snapshot_metrics", "foreign_net_buy_volume", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "foreign_net_buy_volume_20d", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "foreign_net_buy_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "foreign_net_buy_value", "REAL")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_fin_periodic_ticker_period ON financials_periodic(ticker, fiscal_period)"
