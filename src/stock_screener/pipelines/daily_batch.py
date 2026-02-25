@@ -11,6 +11,7 @@ import pandas as pd
 
 from stock_screener.collectors.fundamental_provider import FundamentalProvider, merge_financial_records
 from stock_screener.collectors.dart_client import DartClient
+from stock_screener.collectors.dart_financial_provider import DartFinancialProvider
 from stock_screener.collectors.naver_ratio_client import NaverRatioCollector
 from stock_screener.collectors.pykrx_client import PykrxCollector, PykrxFinancialFallbackProvider
 from stock_screener.config import get_required_env, load_env_file
@@ -45,9 +46,7 @@ class DailyBatchPipeline:
         self.ratio_collector = NaverRatioCollector()
         load_env_file()
         self.dart_client: DartClient | None = None
-        self.financial_providers: list[FundamentalProvider] = [
-            PykrxFinancialFallbackProvider(self.collector),
-        ]
+        self.financial_providers: list[FundamentalProvider] = []
 
 
     def _ensure_dart_client(self) -> None:
@@ -55,6 +54,10 @@ class DailyBatchPipeline:
             return
         dart_api_key = get_required_env("DART_API_KEY")
         self.dart_client = DartClient(api_key=dart_api_key)
+        self.financial_providers = [
+            DartFinancialProvider(self.dart_client),
+            PykrxFinancialFallbackProvider(self.collector),
+        ]
 
     def update_reserve_ratio_only(self, asof_date: str | None = None) -> tuple[str, int]:
         if asof_date:
@@ -240,6 +243,9 @@ class DailyBatchPipeline:
                 fundamental_trading_dates = self.collector.trading_dates(chunk_from_dt, chunk_to_dt)
                 fund_dates = self._fundamental_backfill_dates(chunk_to_dt, fundamental_trading_dates)
                 chunk_rows = 0
+                chunk_eps_non_null = 0
+                chunk_bps_non_null = 0
+                chunk_revenue_non_null = 0
                 logger.info(
                     "Fundamental fetch anchors: chunk=%s/%s, dates=%s, window=%s~%s",
                     chunk_idx,
@@ -258,6 +264,10 @@ class DailyBatchPipeline:
                     upsert_rows = self.repo.upsert_fundamental(fund_frame)
                     upsert_rows += self.repo.upsert_financials(financial_frame, fdt.strftime("%Y-%m-%d"))
                     upsert_rows += self.repo.upsert_financials_periodic(financial_frame)
+                    if not financial_frame.empty:
+                        chunk_eps_non_null += int(financial_frame["eps"].notna().sum())
+                        chunk_bps_non_null += int(financial_frame["bps"].notna().sum())
+                        chunk_revenue_non_null += int(financial_frame["revenue"].notna().sum())
                     fund_rows += upsert_rows
                     chunk_rows += upsert_rows
                     touched = set()
@@ -279,20 +289,28 @@ class DailyBatchPipeline:
                             fund_rows,
                         )
 
+                quality_counts = (
+                    f"eps_non_null={chunk_eps_non_null}, "
+                    f"bps_non_null={chunk_bps_non_null}, "
+                    f"revenue_non_null={chunk_revenue_non_null}"
+                )
                 self.repo.log_job_stage(
                     run_id=run_id,
                     stage=stage,
                     status="success",
-                    message=f"chunk={chunk_idx}/{chunks}, range={chunk_from_dt}~{chunk_to_dt}",
+                    message=f"chunk={chunk_idx}/{chunks}, range={chunk_from_dt}~{chunk_to_dt}, {quality_counts}",
                     row_count=chunk_rows,
                 )
                 logger.info(
-                    "Fundamental chunk done: chunk=%s/%s, range=%s~%s, upsert_rows=%s",
+                    "Fundamental chunk done: chunk=%s/%s, range=%s~%s, upsert_rows=%s, eps_non_null=%s, bps_non_null=%s, revenue_non_null=%s",
                     chunk_idx,
                     chunks,
                     chunk_from_dt,
                     chunk_to_dt,
                     chunk_rows,
+                    chunk_eps_non_null,
+                    chunk_bps_non_null,
+                    chunk_revenue_non_null,
                 )
                 chunks_done = chunk_idx
                 if chunk_idx < chunks:
