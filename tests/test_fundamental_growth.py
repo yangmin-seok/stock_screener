@@ -72,4 +72,59 @@ def test_compute_growth_bundle_exposes_new_growth_keys_and_legacy_alias():
     assert "eps_growth_qtr_over_qtr" in bundle
     assert "sales_growth_ttm" in bundle
     assert "sales_growth_past_5y" in bundle
+    assert "eps_growth_past_3y" in bundle
+    assert "sales_growth_past_3y" in bundle
     assert bundle["eps_growth_this_year_over_year"] == bundle["eps_growth_qtr_over_qtr"]
+
+
+def test_compute_growth_bundle_exposes_3y_cagr_keys_with_metadata():
+    frame = pd.DataFrame(
+        [
+            {"ticker": "AAA", "fiscal_period": "2019-12-31", "period_type": "annual", "consolidation_type": "C", "eps": 1.0, "revenue": 10.0},
+            {"ticker": "AAA", "fiscal_period": "2020-12-31", "period_type": "annual", "consolidation_type": "C", "eps": 2.0, "revenue": 20.0},
+            {"ticker": "AAA", "fiscal_period": "2021-12-31", "period_type": "annual", "consolidation_type": "C", "eps": 3.0, "revenue": 30.0},
+            {"ticker": "AAA", "fiscal_period": "2022-12-31", "period_type": "annual", "consolidation_type": "C", "eps": 4.0, "revenue": 40.0},
+        ]
+    )
+
+    bundle = compute_growth_bundle(frame, ticker="AAA", asof="2023-01-01")
+
+    assert "eps_growth_past_3y" in bundle
+    assert "sales_growth_past_3y" in bundle
+    assert bundle["eps_growth_past_3y"].window_years == 3
+    assert bundle["sales_growth_past_3y"].sample_count == 4
+
+
+def test_growth_calculations_handle_insufficient_samples_and_zero_denominator():
+    quarterly_series = pd.Series([10.0], index=pd.to_datetime(["2024-03-31"]))
+    assert calc_qoq(quarterly_series, asof="2024-04-01", period_type="quarterly").value is None
+
+    ttm_series = pd.Series(
+        [0.0, 0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 10.0],
+        index=pd.to_datetime([
+            "2023-03-31", "2023-06-30", "2023-09-30", "2023-12-31",
+            "2024-03-31", "2024-06-30", "2024-09-30", "2024-12-31",
+        ]),
+    )
+    assert calc_ttm_growth(ttm_series, asof="2025-01-01", period_type="quarterly").value is None
+
+    annual_series = pd.Series([0.0, 10.0], index=pd.to_datetime(["2022-12-31", "2023-12-31"]))
+    assert calc_yoy(annual_series, asof="2024-01-01", period_type="annual").value is None
+
+
+def test_compute_growth_bundle_period_type_mismatch_prevents_axis_mix():
+    frame = pd.DataFrame(
+        [
+            {"ticker": "AAA", "fiscal_period": "2023Q1", "period_type": "quarterly", "consolidation_type": "C", "eps": 1.0, "revenue": 10.0},
+            {"ticker": "AAA", "fiscal_period": "2023Q2", "period_type": "quarterly", "consolidation_type": "C", "eps": 1.1, "revenue": 11.0},
+            {"ticker": "AAA", "fiscal_period": "2023-12-31", "period_type": "annual", "consolidation_type": "C", "eps": 2.0, "revenue": 20.0},
+            {"ticker": "AAA", "fiscal_period": "2024-12-31", "period_type": "annual", "consolidation_type": "C", "eps": 2.2, "revenue": 22.0},
+        ]
+    )
+
+    bundle = compute_growth_bundle(frame, ticker="AAA", asof="2025-01-01")
+
+    assert bundle["eps_growth_qtr_over_qtr"].sample_count == 2
+    assert bundle["eps_growth_past_3y"].sample_count == 2
+    assert bundle["eps_growth_past_3y"].value is None
+    assert bundle["eps_growth_ttm"].value is None

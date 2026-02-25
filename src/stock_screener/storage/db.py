@@ -128,12 +128,14 @@ CREATE TABLE IF NOT EXISTS snapshot_metrics (
     ret_3m REAL,
     ret_6m REAL,
     ret_1y REAL,
+    eps_cagr_3y REAL,
     eps_cagr_5y REAL,
     eps_yoy_q REAL,
     eps_growth_ttm REAL,
     eps_qoq REAL,
     sales_growth_qoq REAL,
     sales_growth_ttm REAL,
+    sales_cagr_3y REAL,
     sales_cagr_5y REAL,
     pe_ratio REAL,
     forward_pe REAL,
@@ -156,12 +158,18 @@ CREATE TABLE IF NOT EXISTS snapshot_metrics (
     current_ratio REAL,
     quick_ratio REAL,
     payout_ratio REAL,
+    eps_cagr_3y_window_years INTEGER,
+    eps_cagr_3y_asof TEXT,
+    eps_cagr_3y_sample_count INTEGER,
     eps_cagr_5y_window_years INTEGER,
     eps_cagr_5y_asof TEXT,
     eps_cagr_5y_sample_count INTEGER,
     eps_yoy_q_window_years INTEGER,
     eps_yoy_q_asof TEXT,
     eps_yoy_q_sample_count INTEGER,
+    sales_cagr_3y_window_years INTEGER,
+    sales_cagr_3y_asof TEXT,
+    sales_cagr_3y_sample_count INTEGER,
     has_price_5y INTEGER,
     has_price_10y INTEGER,
     calc_version TEXT NOT NULL,
@@ -238,12 +246,14 @@ def init_db(db_path: str | Path) -> None:
         _ensure_column(conn, "snapshot_metrics", "current_value", "REAL")
         _ensure_column(conn, "snapshot_metrics", "relative_value", "REAL")
         _ensure_column(conn, "snapshot_metrics", "near_52w_high_ratio", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "eps_cagr_3y", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_yoy_q", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_growth_ttm", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_qoq", "REAL")
         _ensure_column(conn, "snapshot_metrics", "sales_growth_qoq", "REAL")
         _ensure_column(conn, "snapshot_metrics", "sales_growth_ttm", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "sales_cagr_3y", "REAL")
         _ensure_column(conn, "snapshot_metrics", "sales_cagr_5y", "REAL")
         _ensure_column(conn, "snapshot_metrics", "pe_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "forward_pe", "REAL")
@@ -266,12 +276,18 @@ def init_db(db_path: str | Path) -> None:
         _ensure_column(conn, "snapshot_metrics", "current_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "quick_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "payout_ratio", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "eps_cagr_3y_window_years", "INTEGER")
+        _ensure_column(conn, "snapshot_metrics", "eps_cagr_3y_asof", "TEXT")
+        _ensure_column(conn, "snapshot_metrics", "eps_cagr_3y_sample_count", "INTEGER")
         _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y_window_years", "INTEGER")
         _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y_asof", "TEXT")
         _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y_sample_count", "INTEGER")
         _ensure_column(conn, "snapshot_metrics", "eps_yoy_q_window_years", "INTEGER")
         _ensure_column(conn, "snapshot_metrics", "eps_yoy_q_asof", "TEXT")
         _ensure_column(conn, "snapshot_metrics", "eps_yoy_q_sample_count", "INTEGER")
+        _ensure_column(conn, "snapshot_metrics", "sales_cagr_3y_window_years", "INTEGER")
+        _ensure_column(conn, "snapshot_metrics", "sales_cagr_3y_asof", "TEXT")
+        _ensure_column(conn, "snapshot_metrics", "sales_cagr_3y_sample_count", "INTEGER")
         _ensure_column(conn, "snapshot_metrics", "has_price_5y", "INTEGER")
         _ensure_column(conn, "snapshot_metrics", "has_price_10y", "INTEGER")
         _ensure_column(conn, "snapshot_metrics", "fiscal_period", "TEXT")

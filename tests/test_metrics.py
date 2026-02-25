@@ -62,6 +62,8 @@ def test_build_snapshot_includes_expanded_fundamental_metrics_with_nan_fallback(
 
     assert "pe_ratio" in snapshot.columns
     assert "sales_growth_ttm" in snapshot.columns
+    assert "eps_cagr_3y" in snapshot.columns
+    assert "sales_cagr_3y" in snapshot.columns
     assert row["pe_ratio"] == 10.0
     assert np.isnan(row["forward_pe"])
     assert row["ps_ratio"] > 0

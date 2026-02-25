@@ -125,28 +125,38 @@ def build_snapshot(
 
     def _growth_row(ticker: str) -> pd.Series:
         bundle = compute_growth_bundle(fund_hist=fund_hist, ticker=ticker, asof=asof_date)
+        eps_3y = _result_to_row(bundle["eps_growth_past_3y"])
         eps_5y = _result_to_row(bundle["eps_growth_past_5y"])
         eps_yoy = _result_to_row(bundle["eps_growth_this_year_over_year"])
         eps_ttm = _result_to_row(bundle["eps_growth_ttm"])
         eps_qoq = _result_to_row(bundle["eps_growth_qtr_over_qtr"])
         sales_qoq = _result_to_row(bundle["sales_growth_qtr_over_qtr"])
         sales_ttm = _result_to_row(bundle["sales_growth_ttm"])
+        sales_3y = _result_to_row(bundle["sales_growth_past_3y"])
         sales_5y = _result_to_row(bundle["sales_growth_past_5y"])
         return pd.Series(
             {
+                "eps_cagr_3y": eps_3y["value"],
                 "eps_cagr_5y": eps_5y["value"],
                 "eps_yoy_q": eps_yoy["value"],
                 "eps_growth_ttm": eps_ttm["value"],
                 "eps_qoq": eps_qoq["value"],
                 "sales_growth_qoq": sales_qoq["value"],
                 "sales_growth_ttm": sales_ttm["value"],
+                "sales_cagr_3y": sales_3y["value"],
                 "sales_cagr_5y": sales_5y["value"],
+                "eps_cagr_3y_window_years": eps_3y["window_years"],
+                "eps_cagr_3y_asof": eps_3y["asof"],
+                "eps_cagr_3y_sample_count": eps_3y["sample_count"],
                 "eps_cagr_5y_window_years": eps_5y["window_years"],
                 "eps_cagr_5y_asof": eps_5y["asof"],
                 "eps_cagr_5y_sample_count": eps_5y["sample_count"],
                 "eps_yoy_q_window_years": eps_yoy["window_years"],
                 "eps_yoy_q_asof": eps_yoy["asof"],
                 "eps_yoy_q_sample_count": eps_yoy["sample_count"],
+                "sales_cagr_3y_window_years": sales_3y["window_years"],
+                "sales_cagr_3y_asof": sales_3y["asof"],
+                "sales_cagr_3y_sample_count": sales_3y["sample_count"],
             }
         )
 
@@ -212,11 +222,13 @@ def build_snapshot(
         "asof_date", "ticker", "name", "market", "close", "mcap", "avg_value_20d", "current_value", "relative_value", "turnover_20d",
         "per", "pbr", "div", "dps", "eps", "bps", "reserve_ratio", "fiscal_period", "period_type", "reported_date", "consolidation_type", "financial_source", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
         "dist_sma20", "dist_sma50", "dist_sma200", "high_52w", "low_52w", "pos_52w", "near_52w_high_ratio",
-        "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_5y", "eps_yoy_q", "eps_growth_ttm", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y",
+        "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_3y", "eps_cagr_5y", "eps_yoy_q", "eps_growth_ttm", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_3y", "sales_cagr_5y",
         "pe_ratio", "forward_pe", "ps_ratio", "pb_ratio", "peg_ratio", "ps", "peg", "ev", "ev_sales", "ev_ebitda",
         "gross_margin", "operating_margin", "net_margin", "roa", "roe", "roic",
         "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio",
+        "eps_cagr_3y_window_years", "eps_cagr_3y_asof", "eps_cagr_3y_sample_count",
         "eps_cagr_5y_window_years", "eps_cagr_5y_asof", "eps_cagr_5y_sample_count",
-        "eps_yoy_q_window_years", "eps_yoy_q_asof", "eps_yoy_q_sample_count", "has_price_5y", "has_price_10y", "calc_version",
+        "eps_yoy_q_window_years", "eps_yoy_q_asof", "eps_yoy_q_sample_count",
+        "sales_cagr_3y_window_years", "sales_cagr_3y_asof", "sales_cagr_3y_sample_count", "has_price_5y", "has_price_10y", "calc_version",
     ]
     return merged[cols]

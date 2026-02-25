@@ -56,7 +56,7 @@ def _fiscal_period_to_timestamp(fiscal_period: pd.Series, period_type: pd.Series
         y_ts = pd.Series(pd.NaT, index=y_series.index, dtype="datetime64[ns]")
         valid = years.notna()
         if valid.any():
-            y_ts.loc[valid] = pd.PeriodIndex.from_fields(year=years.loc[valid].astype(int), freq="Y").to_timestamp(how="end")
+            y_ts.loc[valid] = pd.to_datetime(years.loc[valid].astype(str) + "-12-31", errors="coerce")
         y_ts.loc[~valid] = pd.to_datetime(y_series.loc[~valid], errors="coerce")
         out.loc[annual_mask] = y_ts
 
@@ -189,18 +189,45 @@ def calc_ttm_growth(series: pd.Series, asof: str, *, period_type: str | None = N
     return GrowthResult(_normalize_growth(current_ttm / prev_ttm - 1), 1, asof, sample_count)
 
 
+def calc_eps_growth_qoq(series: pd.Series, asof: str) -> GrowthResult:
+    return calc_qoq(series, asof=asof, period_type="quarterly")
+
+
+def calc_sales_growth_qoq(series: pd.Series, asof: str) -> GrowthResult:
+    return calc_qoq(series, asof=asof, period_type="quarterly")
+
+
+def calc_eps_growth_ttm(series: pd.Series, asof: str) -> GrowthResult:
+    return calc_ttm_growth(series, asof=asof, period_type="quarterly")
+
+
+def calc_sales_growth_ttm(series: pd.Series, asof: str) -> GrowthResult:
+    return calc_ttm_growth(series, asof=asof, period_type="quarterly")
+
+
+def calc_eps_growth_cagr(series: pd.Series, asof: str, *, window_years: int) -> GrowthResult:
+    return calc_cagr(series, asof=asof, window_years=window_years, period_type="annual")
+
+
+def calc_sales_growth_cagr(series: pd.Series, asof: str, *, window_years: int) -> GrowthResult:
+    return calc_cagr(series, asof=asof, window_years=window_years, period_type="annual")
+
+
 def compute_growth_bundle(fund_hist: pd.DataFrame, ticker: str, asof: str) -> dict[str, GrowthResult]:
     subset = fund_hist[fund_hist["ticker"] == ticker].copy()
+    empty_result = {
+        "eps_growth_qtr_over_qtr": GrowthResult(None, None, asof, 0),
+        "eps_growth_ttm": GrowthResult(None, 1, asof, 0),
+        "eps_growth_past_3y": GrowthResult(None, 3, asof, 0),
+        "eps_growth_past_5y": GrowthResult(None, 5, asof, 0),
+        "sales_growth_qtr_over_qtr": GrowthResult(None, None, asof, 0),
+        "sales_growth_ttm": GrowthResult(None, 1, asof, 0),
+        "sales_growth_past_3y": GrowthResult(None, 3, asof, 0),
+        "sales_growth_past_5y": GrowthResult(None, 5, asof, 0),
+    }
     if subset.empty:
-        return {
-            "eps_growth_past_5y": GrowthResult(None, 5, asof, 0),
-            "eps_growth_qtr_over_qtr": GrowthResult(None, None, asof, 0),
-            "sales_growth_qtr_over_qtr": GrowthResult(None, None, asof, 0),
-            "eps_growth_ttm": GrowthResult(None, 1, asof, 0),
-            "sales_growth_ttm": GrowthResult(None, 1, asof, 0),
-            "sales_growth_past_5y": GrowthResult(None, 5, asof, 0),
-            "eps_growth_this_year_over_year": GrowthResult(None, 1, asof, 0),
-        }
+        empty_result["eps_growth_this_year_over_year"] = empty_result["eps_growth_qtr_over_qtr"]
+        return empty_result
 
     deduped = _preprocess_periodic_history(subset)
     annual = _filter_period_type(deduped, {"annual", "yearly", "y", "year"})
@@ -211,15 +238,17 @@ def compute_growth_bundle(fund_hist: pd.DataFrame, ticker: str, asof: str) -> di
     rev_annual_series = _to_numeric_series(annual, "revenue")
     rev_quarterly_series = _to_numeric_series(quarterly, "revenue")
 
-    eps_qoq = calc_qoq(eps_quarterly_series, asof=asof, period_type="quarterly")
-
-    return {
-        "eps_growth_past_5y": calc_cagr(eps_annual_series, asof=asof, window_years=5, period_type="annual"),
+    eps_qoq = calc_eps_growth_qoq(eps_quarterly_series, asof=asof)
+    bundle = {
         "eps_growth_qtr_over_qtr": eps_qoq,
-        "sales_growth_qtr_over_qtr": calc_qoq(rev_quarterly_series, asof=asof, period_type="quarterly"),
-        "eps_growth_ttm": calc_ttm_growth(eps_quarterly_series, asof=asof, period_type="quarterly"),
-        "sales_growth_ttm": calc_ttm_growth(rev_quarterly_series, asof=asof, period_type="quarterly"),
-        "sales_growth_past_5y": calc_cagr(rev_annual_series, asof=asof, window_years=5, period_type="annual"),
-        # Backward-compatibility alias for existing snapshot/query/session keys.
-        "eps_growth_this_year_over_year": eps_qoq,
+        "eps_growth_ttm": calc_eps_growth_ttm(eps_quarterly_series, asof=asof),
+        "eps_growth_past_3y": calc_eps_growth_cagr(eps_annual_series, asof=asof, window_years=3),
+        "eps_growth_past_5y": calc_eps_growth_cagr(eps_annual_series, asof=asof, window_years=5),
+        "sales_growth_qtr_over_qtr": calc_sales_growth_qoq(rev_quarterly_series, asof=asof),
+        "sales_growth_ttm": calc_sales_growth_ttm(rev_quarterly_series, asof=asof),
+        "sales_growth_past_3y": calc_sales_growth_cagr(rev_annual_series, asof=asof, window_years=3),
+        "sales_growth_past_5y": calc_sales_growth_cagr(rev_annual_series, asof=asof, window_years=5),
     }
+    # Backward-compatibility alias for existing snapshot/query/session keys.
+    bundle["eps_growth_this_year_over_year"] = bundle["eps_growth_qtr_over_qtr"]
+    return bundle
