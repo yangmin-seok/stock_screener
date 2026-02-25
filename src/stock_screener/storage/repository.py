@@ -288,6 +288,119 @@ class Repository:
             )
         return len(rows)
 
+
+    def upsert_financial_quality(self, frame: pd.DataFrame) -> int:
+        if frame.empty:
+            return 0
+        data = frame.copy()
+        defaults = {
+            "provider": "",
+            "source": "",
+            "fiscal_period": "",
+            "period_type": "",
+            "ticker": "",
+        }
+        for col, default in defaults.items():
+            if col not in data.columns:
+                data[col] = default
+            data[col] = data[col].fillna(default).astype(str)
+        for col in ("rows_total", "eps_null", "bps_null", "chunk_idx"):
+            data[col] = pd.to_numeric(data[col], errors="coerce").fillna(0).astype(int)
+
+        rows = self._to_sql_records(
+            data,
+            [
+                "asof_date",
+                "metric_date",
+                "chunk_idx",
+                "metric_scope",
+                "provider",
+                "source",
+                "fiscal_period",
+                "period_type",
+                "ticker",
+                "rows_total",
+                "eps_null",
+                "bps_null",
+            ],
+        )
+        with db_session(self.db_path) as conn:
+            conn.executemany(
+                """
+                INSERT INTO financial_quality_daily(
+                    asof_date, metric_date, chunk_idx, metric_scope,
+                    provider, source, fiscal_period, period_type, ticker,
+                    rows_total, eps_null, bps_null, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(
+                    asof_date, metric_date, chunk_idx, metric_scope,
+                    provider, source, fiscal_period, period_type, ticker
+                ) DO UPDATE SET
+                    rows_total=excluded.rows_total,
+                    eps_null=excluded.eps_null,
+                    bps_null=excluded.bps_null,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                rows,
+            )
+        return len(rows)
+
+    def get_financial_quality_source_report(self, asof_date: str) -> pd.DataFrame:
+        query = """
+        SELECT
+            source,
+            SUM(rows_total) AS rows_total,
+            SUM(eps_null) AS eps_null,
+            SUM(bps_null) AS bps_null,
+            CASE WHEN SUM(rows_total) > 0 THEN ROUND(SUM(eps_null) * 1.0 / SUM(rows_total), 6) ELSE 0 END AS eps_null_ratio,
+            CASE WHEN SUM(rows_total) > 0 THEN ROUND(SUM(bps_null) * 1.0 / SUM(rows_total), 6) ELSE 0 END AS bps_null_ratio
+        FROM financial_quality_daily
+        WHERE asof_date = ? AND metric_scope = 'source'
+        GROUP BY source
+        ORDER BY source
+        """
+        with db_session(self.db_path) as conn:
+            return pd.read_sql_query(query, conn, params=(asof_date,))
+
+    def get_financial_quality_period_report(self, asof_date: str) -> pd.DataFrame:
+        query = """
+        SELECT
+            fiscal_period,
+            period_type,
+            SUM(rows_total) AS rows_total,
+            SUM(eps_null) AS eps_null,
+            SUM(bps_null) AS bps_null,
+            CASE WHEN SUM(rows_total) > 0 THEN ROUND(SUM(eps_null) * 1.0 / SUM(rows_total), 6) ELSE 0 END AS eps_null_ratio,
+            CASE WHEN SUM(rows_total) > 0 THEN ROUND(SUM(bps_null) * 1.0 / SUM(rows_total), 6) ELSE 0 END AS bps_null_ratio
+        FROM financial_quality_daily
+        WHERE asof_date = ? AND metric_scope = 'period'
+        GROUP BY fiscal_period, period_type
+        ORDER BY fiscal_period, period_type
+        """
+        with db_session(self.db_path) as conn:
+            return pd.read_sql_query(query, conn, params=(asof_date,))
+
+    def get_financial_quality_top_null_tickers(self, asof_date: str, limit: int = 10) -> pd.DataFrame:
+        safe_limit = max(int(limit), 1)
+        query = """
+        SELECT
+            ticker,
+            SUM(rows_total) AS rows_total,
+            SUM(eps_null) AS eps_null,
+            SUM(bps_null) AS bps_null,
+            SUM(eps_null + bps_null) AS null_total,
+            CASE WHEN SUM(rows_total) > 0 THEN ROUND(SUM(eps_null) * 1.0 / SUM(rows_total), 6) ELSE 0 END AS eps_null_ratio,
+            CASE WHEN SUM(rows_total) > 0 THEN ROUND(SUM(bps_null) * 1.0 / SUM(rows_total), 6) ELSE 0 END AS bps_null_ratio
+        FROM financial_quality_daily
+        WHERE asof_date = ? AND metric_scope = 'ticker'
+        GROUP BY ticker
+        ORDER BY null_total DESC, ticker ASC
+        LIMIT ?
+        """
+        with db_session(self.db_path) as conn:
+            return pd.read_sql_query(query, conn, params=(asof_date, safe_limit))
+
     def replace_snapshot(self, asof_date: str, frame: pd.DataFrame) -> int:
         with db_session(self.db_path) as conn:
             conn.execute("DELETE FROM snapshot_metrics WHERE asof_date = ?", (asof_date,))

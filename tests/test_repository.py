@@ -267,3 +267,130 @@ def test_get_latest_batch_chunk_report_returns_latest_run(tmp_path):
     assert len(rows) == 1
     assert rows[0]["run_id"] == "daily_batch:2026-02-20"
     assert rows[0]["eps_ratio"] == "11/20 (55.0%)"
+
+
+def test_financial_quality_reports_and_top_null_tickers(tmp_path):
+    db = tmp_path / "x.db"
+    init_db(db)
+    repo = Repository(db)
+
+    quality_rows = pd.DataFrame(
+        [
+            {
+                "asof_date": "2026-02-20",
+                "metric_date": "2026-02-19",
+                "chunk_idx": 1,
+                "metric_scope": "source",
+                "provider": "",
+                "source": "dart_primary",
+                "fiscal_period": "",
+                "period_type": "",
+                "ticker": "",
+                "rows_total": 10,
+                "eps_null": 2,
+                "bps_null": 1,
+            },
+            {
+                "asof_date": "2026-02-20",
+                "metric_date": "2026-02-19",
+                "chunk_idx": 1,
+                "metric_scope": "source",
+                "provider": "",
+                "source": "pykrx_fallback",
+                "fiscal_period": "",
+                "period_type": "",
+                "ticker": "",
+                "rows_total": 5,
+                "eps_null": 1,
+                "bps_null": 2,
+            },
+            {
+                "asof_date": "2026-02-20",
+                "metric_date": "2026-02-19",
+                "chunk_idx": 1,
+                "metric_scope": "period",
+                "provider": "",
+                "source": "",
+                "fiscal_period": "2025Q4",
+                "period_type": "quarterly",
+                "ticker": "",
+                "rows_total": 8,
+                "eps_null": 2,
+                "bps_null": 1,
+            },
+            {
+                "asof_date": "2026-02-20",
+                "metric_date": "2026-02-19",
+                "chunk_idx": 1,
+                "metric_scope": "period",
+                "provider": "",
+                "source": "",
+                "fiscal_period": "2025",
+                "period_type": "annual",
+                "ticker": "",
+                "rows_total": 7,
+                "eps_null": 1,
+                "bps_null": 2,
+            },
+            {
+                "asof_date": "2026-02-20",
+                "metric_date": "2026-02-19",
+                "chunk_idx": 1,
+                "metric_scope": "ticker",
+                "provider": "",
+                "source": "",
+                "fiscal_period": "",
+                "period_type": "",
+                "ticker": "005930",
+                "rows_total": 3,
+                "eps_null": 1,
+                "bps_null": 1,
+            },
+            {
+                "asof_date": "2026-02-20",
+                "metric_date": "2026-02-19",
+                "chunk_idx": 1,
+                "metric_scope": "ticker",
+                "provider": "",
+                "source": "",
+                "fiscal_period": "",
+                "period_type": "",
+                "ticker": "000660",
+                "rows_total": 4,
+                "eps_null": 2,
+                "bps_null": 1,
+            },
+            {
+                "asof_date": "2026-02-20",
+                "metric_date": "2026-02-19",
+                "chunk_idx": 1,
+                "metric_scope": "ticker",
+                "provider": "",
+                "source": "",
+                "fiscal_period": "",
+                "period_type": "",
+                "ticker": "035420",
+                "rows_total": 2,
+                "eps_null": 0,
+                "bps_null": 2,
+            },
+        ]
+    )
+
+    inserted = repo.upsert_financial_quality(quality_rows)
+    assert inserted == 7
+
+    source_report = repo.get_financial_quality_source_report("2026-02-20")
+    assert source_report["source"].tolist() == ["dart_primary", "pykrx_fallback"]
+    assert source_report.loc[source_report["source"] == "dart_primary", "eps_null_ratio"].iloc[0] == 0.2
+    assert source_report.loc[source_report["source"] == "pykrx_fallback", "bps_null_ratio"].iloc[0] == 0.4
+
+    period_report = repo.get_financial_quality_period_report("2026-02-20")
+    assert len(period_report) == 2
+    q_row = period_report.loc[period_report["period_type"] == "quarterly"].iloc[0]
+    assert q_row["fiscal_period"] == "2025Q4"
+    assert q_row["eps_null_ratio"] == 0.25
+
+    top_tickers = repo.get_financial_quality_top_null_tickers("2026-02-20", limit=2)
+    assert top_tickers["ticker"].tolist() == ["000660", "005930"]
+    assert top_tickers.iloc[0]["null_total"] == 3

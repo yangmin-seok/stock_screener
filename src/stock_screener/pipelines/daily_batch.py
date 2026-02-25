@@ -117,6 +117,51 @@ class DailyBatchPipeline:
             return 0
         return int(frame[metric].notna().sum())
 
+
+    @staticmethod
+    def _build_financial_quality_rows(financial_frame: pd.DataFrame, *, asof: str, metric_date: str, chunk_idx: int) -> pd.DataFrame:
+        if financial_frame.empty:
+            return pd.DataFrame(columns=[
+                "asof_date", "metric_date", "chunk_idx", "metric_scope", "provider", "source",
+                "fiscal_period", "period_type", "ticker", "rows_total", "eps_null", "bps_null",
+            ])
+
+        base = financial_frame.copy()
+        for col, default in (("source", ""), ("fiscal_period", ""), ("period_type", ""), ("ticker", "")):
+            if col not in base.columns:
+                base[col] = default
+            base[col] = base[col].fillna(default).astype(str)
+
+        base["eps_null"] = base["eps"].isna().astype(int) if "eps" in base.columns else 1
+        base["bps_null"] = base["bps"].isna().astype(int) if "bps" in base.columns else 1
+
+        def _aggregate(group_cols: list[str], scope: str) -> pd.DataFrame:
+            grouped = (
+                base.groupby(group_cols, dropna=False)
+                .agg(rows_total=("ticker", "size"), eps_null=("eps_null", "sum"), bps_null=("bps_null", "sum"))
+                .reset_index()
+            )
+            grouped["asof_date"] = asof
+            grouped["metric_date"] = metric_date
+            grouped["chunk_idx"] = chunk_idx
+            grouped["metric_scope"] = scope
+            grouped["provider"] = ""
+            grouped["source"] = grouped.get("source", "")
+            grouped["fiscal_period"] = grouped.get("fiscal_period", "")
+            grouped["period_type"] = grouped.get("period_type", "")
+            grouped["ticker"] = grouped.get("ticker", "")
+            return grouped[
+                [
+                    "asof_date", "metric_date", "chunk_idx", "metric_scope", "provider", "source",
+                    "fiscal_period", "period_type", "ticker", "rows_total", "eps_null", "bps_null",
+                ]
+            ]
+
+        by_source = _aggregate(["source"], "source")
+        by_period = _aggregate(["fiscal_period", "period_type"], "period")
+        by_ticker = _aggregate(["ticker"], "ticker")
+        return pd.concat([by_source, by_period, by_ticker], ignore_index=True)
+
     def _collect_financials(self, dt: date, *, asof: str, chunk_idx: int) -> pd.DataFrame:
         provider_frames: list[pd.DataFrame] = []
         for provider in self.financial_providers:
@@ -356,9 +401,16 @@ class DailyBatchPipeline:
                         eps_null,
                         bps_null,
                     )
+                    quality_rows = self._build_financial_quality_rows(
+                        financial_frame,
+                        asof=asof_str,
+                        metric_date=fdt.strftime("%Y-%m-%d"),
+                        chunk_idx=chunk_idx,
+                    )
                     upsert_rows = self.repo.upsert_fundamental(fund_frame)
                     upsert_rows += self.repo.upsert_financials(financial_frame, fdt.strftime("%Y-%m-%d"))
                     upsert_rows += self.repo.upsert_financials_periodic(financial_frame)
+                    upsert_rows += self.repo.upsert_financial_quality(quality_rows)
                     if not financial_frame.empty:
                         chunk_eps_non_null += int(financial_frame["eps"].notna().sum())
                         chunk_bps_non_null += int(financial_frame["bps"].notna().sum())
