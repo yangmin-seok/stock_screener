@@ -115,15 +115,10 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("volatility_min_custom", "float", 0.0),
     FilterSpec("volatility_max_custom", "float", 0.0),
     FilterSpec("foreign_buy_filter_mode", "str", "Any"),
-    FilterSpec("foreign_buy_metric", "str", "foreign_net_buy_ratio"),
+    FilterSpec("foreign_buy_metric", "str", "foreign_net_buy_value_20d"),
     FilterSpec("foreign_buy_bucket", "str", "전체"),
     FilterSpec("foreign_buy_min_custom", "float", 0.0),
     FilterSpec("foreign_buy_max_custom", "float", 0.0),
-    FilterSpec("foreign_buy2_filter_mode", "str", "Any"),
-    FilterSpec("foreign_buy2_metric", "str", "none"),
-    FilterSpec("foreign_buy2_bucket", "str", "전체"),
-    FilterSpec("foreign_buy2_min_custom", "float", 0.0),
-    FilterSpec("foreign_buy2_max_custom", "float", 0.0),
     FilterSpec("dist_sma20_filter_mode", "str", "Any"),
     FilterSpec("dist_sma20_bucket", "str", "전체"),
     FilterSpec("dist_sma20_min_custom", "float", 0.0),
@@ -274,10 +269,10 @@ VOLATILITY_BUCKETS: dict[str, tuple[float | None, float | None]] = {
 }
 FOREIGN_BUY_BUCKETS: dict[str, tuple[float | None, float | None]] = {
     "전체": (None, None),
-    "-1 이하": (None, -1.0),
-    "-1~0": (-1.0, 0.0),
-    "0~1": (0.0, 1.0),
-    "1 이상": (1.0, None),
+    "-100억 이하": (None, -10_000_000_000),
+    "-100억~0": (-10_000_000_000, 0.0),
+    "0~100억": (0.0, 10_000_000_000),
+    "100억 이상": (10_000_000_000, None),
 }
 DIST_SMA_BUCKETS: dict[str, tuple[float | None, float | None]] = {
     "전체": (None, None),
@@ -301,13 +296,7 @@ NEAR_LOW_BUCKETS: dict[str, tuple[float | None, float | None]] = {
     "60% 이상": (0.60, None),
 }
 FOREIGN_BUY_METRICS: dict[str, tuple[str, str]] = {
-    "foreign_net_buy_ratio": ("외국인 순매수 비율", "%"),
-    "foreign_net_buy_volume": ("외국인 순매수량(당일)", "주"),
-    "foreign_net_buy_volume_20d": ("외국인 순매수량(20D 평균)", "주"),
-}
-FOREIGN_BUY_SECONDARY_METRICS: dict[str, tuple[str, str]] = {
-    "none": ("사용 안함", ""),
-    **FOREIGN_BUY_METRICS,
+    "foreign_net_buy_value_20d": ("외국인 순매수 20일 누적금액", "원"),
 }
 
 
@@ -929,9 +918,6 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("foreign_buy_filter_mode") not in FOREIGN_BUY_MODES:
         st.session_state.foreign_buy_filter_mode = "Any"
         st.session_state.query_parse_errors.append("foreign_buy_filter_mode")
-    if st.session_state.get("foreign_buy2_filter_mode") not in FOREIGN_BUY_MODES:
-        st.session_state.foreign_buy2_filter_mode = "Any"
-        st.session_state.query_parse_errors.append("foreign_buy2_filter_mode")
     if st.session_state.get("dist_sma20_filter_mode") not in RSI_MODES:
         st.session_state.dist_sma20_filter_mode = "Any"
         st.session_state.query_parse_errors.append("dist_sma20_filter_mode")
@@ -987,9 +973,6 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("foreign_buy_bucket") not in FOREIGN_BUY_BUCKETS:
         st.session_state.foreign_buy_bucket = "전체"
         st.session_state.query_parse_errors.append("foreign_buy_bucket")
-    if st.session_state.get("foreign_buy2_bucket") not in FOREIGN_BUY_BUCKETS:
-        st.session_state.foreign_buy2_bucket = "전체"
-        st.session_state.query_parse_errors.append("foreign_buy2_bucket")
     if st.session_state.get("dist_sma20_bucket") not in DIST_SMA_BUCKETS:
         st.session_state.dist_sma20_bucket = "전체"
         st.session_state.query_parse_errors.append("dist_sma20_bucket")
@@ -1009,11 +992,8 @@ if "query_params_restored" not in st.session_state:
         st.session_state.momentum_metric = "ret_3m"
         st.session_state.query_parse_errors.append("momentum_metric")
     if st.session_state.get("foreign_buy_metric") not in FOREIGN_BUY_METRICS:
-        st.session_state.foreign_buy_metric = "foreign_net_buy_ratio"
+        st.session_state.foreign_buy_metric = "foreign_net_buy_value_20d"
         st.session_state.query_parse_errors.append("foreign_buy_metric")
-    if st.session_state.get("foreign_buy2_metric") not in FOREIGN_BUY_SECONDARY_METRICS:
-        st.session_state.foreign_buy2_metric = "none"
-        st.session_state.query_parse_errors.append("foreign_buy2_metric")
 
     st.session_state.query_params_restored = True
 
@@ -1049,8 +1029,6 @@ if st.session_state.get("volatility_filter_mode") not in VOLATILITY_MODES:
     st.session_state.volatility_filter_mode = "Any"
 if st.session_state.get("foreign_buy_filter_mode") not in FOREIGN_BUY_MODES:
     st.session_state.foreign_buy_filter_mode = "Any"
-if st.session_state.get("foreign_buy2_filter_mode") not in FOREIGN_BUY_MODES:
-    st.session_state.foreign_buy2_filter_mode = "Any"
 if st.session_state.get("dist_sma20_filter_mode") not in RSI_MODES:
     st.session_state.dist_sma20_filter_mode = "Any"
 if st.session_state.get("dist_sma50_filter_mode") not in RSI_MODES:
@@ -1088,8 +1066,6 @@ if st.session_state.get("volatility_bucket") not in VOLATILITY_BUCKETS:
     st.session_state.volatility_bucket = "전체"
 if st.session_state.get("foreign_buy_bucket") not in FOREIGN_BUY_BUCKETS:
     st.session_state.foreign_buy_bucket = "전체"
-if st.session_state.get("foreign_buy2_bucket") not in FOREIGN_BUY_BUCKETS:
-    st.session_state.foreign_buy2_bucket = "전체"
 if st.session_state.get("dist_sma20_bucket") not in DIST_SMA_BUCKETS:
     st.session_state.dist_sma20_bucket = "전체"
 if st.session_state.get("dist_sma50_bucket") not in DIST_SMA_BUCKETS:
@@ -1103,9 +1079,7 @@ if st.session_state.get("near_low_bucket") not in NEAR_LOW_BUCKETS:
 if st.session_state.get("momentum_metric") not in MOMENTUM_METRICS:
     st.session_state.momentum_metric = "ret_3m"
 if st.session_state.get("foreign_buy_metric") not in FOREIGN_BUY_METRICS:
-    st.session_state.foreign_buy_metric = "foreign_net_buy_ratio"
-if st.session_state.get("foreign_buy2_metric") not in FOREIGN_BUY_SECONDARY_METRICS:
-    st.session_state.foreign_buy2_metric = "none"
+    st.session_state.foreign_buy_metric = "foreign_net_buy_value_20d"
 
 _poll_background_job()
 
@@ -1259,9 +1233,9 @@ technical_metric_availability = {
     "gap_pct": "gap_pct" in base.columns and base["gap_pct"].notna().any(),
     "chg_from_open_pct": "chg_from_open_pct" in base.columns and base["chg_from_open_pct"].notna().any(),
     "volatility_20d": "volatility_20d" in base.columns and base["volatility_20d"].notna().any(),
-    "foreign_net_buy_ratio": "foreign_net_buy_ratio" in base.columns and base["foreign_net_buy_ratio"].notna().any(),
     "foreign_net_buy_volume": "foreign_net_buy_volume" in base.columns and base["foreign_net_buy_volume"].notna().any(),
     "foreign_net_buy_volume_20d": "foreign_net_buy_volume_20d" in base.columns and base["foreign_net_buy_volume_20d"].notna().any(),
+    "foreign_net_buy_value_20d": "foreign_net_buy_value_20d" in base.columns and base["foreign_net_buy_value_20d"].notna().any(),
 }
 
 def _active_filter_count_from_state() -> int:
@@ -1291,7 +1265,6 @@ def _active_filter_count_from_state() -> int:
             int(st.session_state.get("chg_open_filter_mode", "Any") != "Any"),
             int(st.session_state.get("volatility_filter_mode", "Any") != "Any"),
             int(st.session_state.get("foreign_buy_filter_mode", "Any") != "Any"),
-            int(st.session_state.get("foreign_buy2_metric", "none") != "none" and st.session_state.get("foreign_buy2_filter_mode", "Any") != "Any"),
             int(bool(st.session_state.get("apply_eps_cagr_5y", False))),
             int(bool(st.session_state.get("apply_eps_yoy_q", False))),
             int(bool(st.session_state.get("apply_eps_qoq", False))),
@@ -1684,6 +1657,7 @@ with technical_tab:
         row_disabled=not technical_metric_availability["chg_from_open_pct"],
     )
 
+    st.markdown("##### 변동성")
     _render_technical_range_filter(
         title="변동성(20D)",
         mode_key="volatility_filter_mode",
@@ -1699,50 +1673,21 @@ with technical_tab:
         row_disabled=not technical_metric_availability["volatility_20d"],
     )
 
-    foreign_metric_cols = st.columns(4)
-    with foreign_metric_cols[0]:
-        st.selectbox(
-            "외국인 필터1 지표",
-            list(FOREIGN_BUY_METRICS.keys()),
-            key="foreign_buy_metric",
-            format_func=lambda key: FOREIGN_BUY_METRICS[key][0],
-        )
+    st.markdown("##### 외국인")
+    st.caption("외국인 스크리너는 외국인 순매수 20일 누적금액(foreign_net_buy_value_20d) 기준으로 동작합니다.")
+    st.session_state.foreign_buy_metric = "foreign_net_buy_value_20d"
     _render_technical_range_filter(
-        title="외국인 필터1",
+        title="외국인 순매수 20일 누적금액",
         mode_key="foreign_buy_filter_mode",
         mode_options=FOREIGN_BUY_MODES,
         bucket_key="foreign_buy_bucket",
         bucket_options=FOREIGN_BUY_BUCKETS,
         min_key="foreign_buy_min_custom",
         max_key="foreign_buy_max_custom",
-        step=0.1,
-        number_format="%.2f",
-        help_text="필터1 선택 지표에 적용",
-        row_disabled=not technical_metric_availability.get(st.session_state.get("foreign_buy_metric", "foreign_net_buy_ratio"), False),
-    )
-
-    with foreign_metric_cols[1]:
-        st.selectbox(
-            "외국인 필터2 지표",
-            list(FOREIGN_BUY_SECONDARY_METRICS.keys()),
-            key="foreign_buy2_metric",
-            format_func=lambda key: FOREIGN_BUY_SECONDARY_METRICS[key][0],
-        )
-    foreign_buy2_disabled = st.session_state.get("foreign_buy2_metric") == "none" or not technical_metric_availability.get(st.session_state.get("foreign_buy2_metric", "none"), False)
-    if foreign_buy2_disabled:
-        st.session_state.foreign_buy2_filter_mode = "Any"
-    _render_technical_range_filter(
-        title="외국인 필터2",
-        mode_key="foreign_buy2_filter_mode",
-        mode_options=FOREIGN_BUY_MODES,
-        bucket_key="foreign_buy2_bucket",
-        bucket_options=FOREIGN_BUY_BUCKETS,
-        min_key="foreign_buy2_min_custom",
-        max_key="foreign_buy2_max_custom",
-        step=0.1,
-        number_format="%.2f",
-        help_text="필터2는 선택 시에만 적용됩니다.",
-        row_disabled=foreign_buy2_disabled,
+        step=1000000.0,
+        number_format="%.0f",
+        help_text="단위: 원",
+        row_disabled=not technical_metric_availability.get("foreign_net_buy_value_20d", False),
     )
 
 
@@ -1958,27 +1903,15 @@ if technical_metric_availability["volatility_20d"]:
         min_custom=st.session_state.get("volatility_min_custom", 0.0),
         max_custom=st.session_state.get("volatility_max_custom", 0.0),
     )
-primary_foreign_metric = st.session_state.get("foreign_buy_metric", "foreign_net_buy_ratio")
-if technical_metric_availability.get(primary_foreign_metric, False):
+if technical_metric_availability.get("foreign_net_buy_value_20d", False):
     filtered = _apply_range_mode_filter(
         filtered,
-        col=primary_foreign_metric,
+        col="foreign_net_buy_value_20d",
         mode=st.session_state.get("foreign_buy_filter_mode", "Any"),
         bucket=st.session_state.get("foreign_buy_bucket", "전체"),
         bucket_map=FOREIGN_BUY_BUCKETS,
         min_custom=st.session_state.get("foreign_buy_min_custom", 0.0),
         max_custom=st.session_state.get("foreign_buy_max_custom", 0.0),
-    )
-secondary_foreign_metric = st.session_state.get("foreign_buy2_metric", "none")
-if secondary_foreign_metric != "none" and technical_metric_availability.get(secondary_foreign_metric, False):
-    filtered = _apply_range_mode_filter(
-        filtered,
-        col=secondary_foreign_metric,
-        mode=st.session_state.get("foreign_buy2_filter_mode", "Any"),
-        bucket=st.session_state.get("foreign_buy2_bucket", "전체"),
-        bucket_map=FOREIGN_BUY_BUCKETS,
-        min_custom=st.session_state.get("foreign_buy2_min_custom", 0.0),
-        max_custom=st.session_state.get("foreign_buy2_max_custom", 0.0),
     )
 if apply_eps_cagr_5y:
     filtered = filtered[(filtered["eps_cagr_5y"].notna()) & (filtered["eps_cagr_5y"] >= eps_cagr_5y_min)]
@@ -2002,7 +1935,7 @@ sort_col = st.selectbox(
         "mcap", "pbr", "reserve_ratio", "roe_proxy", "ret_3m", "ret_6m", "ret_1y", "near_52w_high_ratio", "pos_52w", "div",
         "avg_value_20d", "current_value", "relative_value", "ev_ebitda", "eps_cagr_5y", "eps_yoy_q", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y",
         "rsi_14", "dist_sma20", "dist_sma50", "dist_sma200", "atr_14", "gap_pct", "chg_from_open_pct", "volatility_20d",
-        "foreign_net_buy_ratio", "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_value",
+        "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_value", "foreign_net_buy_value_20d",
     ],
     key="sort_col",
 )
@@ -2103,14 +2036,8 @@ if st.session_state.get("volatility_filter_mode") != "Any":
         f"변동성(20D) {_format_range_summary(st.session_state.get('volatility_filter_mode', 'Any'), st.session_state.get('volatility_bucket', '전체'), st.session_state.get('volatility_min_custom', 0.0), st.session_state.get('volatility_max_custom', 0.0))}"
     )
 if st.session_state.get("foreign_buy_filter_mode") != "Any":
-    primary_foreign_label = FOREIGN_BUY_METRICS.get(st.session_state.get("foreign_buy_metric", "foreign_net_buy_ratio"), ("외국인", ""))[0]
     condition_summaries.append(
-        f"{primary_foreign_label} {_format_range_summary(st.session_state.get('foreign_buy_filter_mode', 'Any'), st.session_state.get('foreign_buy_bucket', '전체'), st.session_state.get('foreign_buy_min_custom', 0.0), st.session_state.get('foreign_buy_max_custom', 0.0))}"
-    )
-if st.session_state.get("foreign_buy2_metric") != "none" and st.session_state.get("foreign_buy2_filter_mode") != "Any":
-    secondary_foreign_label = FOREIGN_BUY_SECONDARY_METRICS.get(st.session_state.get("foreign_buy2_metric", "none"), ("외국인2", ""))[0]
-    condition_summaries.append(
-        f"{secondary_foreign_label} {_format_range_summary(st.session_state.get('foreign_buy2_filter_mode', 'Any'), st.session_state.get('foreign_buy2_bucket', '전체'), st.session_state.get('foreign_buy2_min_custom', 0.0), st.session_state.get('foreign_buy2_max_custom', 0.0))}"
+        f"외국인 순매수 20D 누적금액 {_format_range_summary(st.session_state.get('foreign_buy_filter_mode', 'Any'), st.session_state.get('foreign_buy_bucket', '전체'), st.session_state.get('foreign_buy_min_custom', 0.0), st.session_state.get('foreign_buy_max_custom', 0.0))}"
     )
 if st.session_state.get("apply_eps_qoq"):
     condition_summaries.append(f"EPS Q/Q ≥ {st.session_state.get('eps_qoq_min', 0):.2f}")
@@ -2132,7 +2059,7 @@ show_cols = [
     "ticker", "name", "market", "close", "mcap", "avg_value_20d", "current_value", "relative_value", "pbr", "reserve_ratio", "per", "div", "dps",
     "eps", "bps", "fiscal_period", "period_type", "reported_date", "consolidation_type", "financial_source", "roe_proxy", "eps_positive", "ret_3m", "ret_6m", "ret_1y",
     "rsi_14", "dist_sma20", "dist_sma50", "dist_sma200", "pos_52w", "near_52w_high_ratio", "atr_14", "gap_pct", "chg_from_open_pct", "volatility_20d",
-    "foreign_net_buy_ratio", "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_value",
+    "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_value", "foreign_net_buy_value_20d",
     "eps_cagr_5y", "eps_yoy_q", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y", "pe_ratio", "forward_pe", "ps_ratio", "pb_ratio", "peg_ratio", "ev_sales", "ev_ebitda", "gross_margin", "operating_margin", "net_margin", "roa", "roe", "roic", "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio", "has_price_5y", "has_price_10y",
 ]
 st.dataframe(
@@ -2155,9 +2082,10 @@ st.dataframe(
         "gap_pct": st.column_config.NumberColumn("Gap%", format="%.2f"),
         "chg_from_open_pct": st.column_config.NumberColumn("시가대비%", format="%.2f"),
         "volatility_20d": st.column_config.NumberColumn("변동성(20D)", format="%.2f"),
-        "foreign_net_buy_ratio": st.column_config.NumberColumn("외국인 순매수비율", format="%.2f"),
         "foreign_net_buy_volume": st.column_config.NumberColumn("외국인 순매수량", format="%,d"),
         "foreign_net_buy_volume_20d": st.column_config.NumberColumn("외국인 순매수량(20D)", format="%,d"),
+        "foreign_net_buy_value": st.column_config.NumberColumn("외국인 순매수금액(당일)", format="%,d"),
+        "foreign_net_buy_value_20d": st.column_config.NumberColumn("외국인 순매수금액(20D 누적)", format="%,d"),
     },
 )
 

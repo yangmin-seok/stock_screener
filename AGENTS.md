@@ -11,11 +11,14 @@
 - Long-running jobs must remain cancellable from UI.
 - Descriptive tab should support range-based selectors (market cap, price, dividend yield) with `Any / 구간 선택 / 직접 입력`.
 - In Descriptive tab, keep control rows visually aligned to the same column grid; avoid mixing incompatible column splits that break vertical line-up.
+- In Technical tab, keep `변동성` and `외국인` controls separated; do not merge into one row/group.
+- Foreign screener metric is fixed to `foreign_net_buy_value_20d` (20D 누적금액, KRW).
 
 ## Coding guidelines
 - Keep filter state and URL query sync in lockstep.
   - When adding/changing filters, update `FILTER_SPECS`, parse/serialize flow, and application logic together.
 - Preserve backward compatibility for query/session keys when renaming filter fields.
+  - Legacy `foreign_buy2_*` keys should be safely pruned from query sync while preserving old shared-link behavior.
 - Avoid UI clutter: prefer one clear control path per filter and remove duplicate/overlapping controls.
 - If a new UI row needs extra fields, prefer multi-row composition on the same base grid instead of introducing a conflicting grid width.
 - Do not wrap imports in try/catch.
