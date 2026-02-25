@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 import logging
 from pathlib import Path
+import os
 import time
 from typing import Callable
 
@@ -53,7 +54,10 @@ class DailyBatchPipeline:
         if self.dart_client is not None:
             return
         dart_api_key = get_required_env("DART_API_KEY")
-        self.dart_client = DartClient(api_key=dart_api_key)
+        self.dart_client = DartClient(
+            api_key=dart_api_key,
+            endpoint=(os.environ.get("DART_FINANCIALS_ENDPOINT") or None),
+        )
         self.financial_providers = [
             DartFinancialProvider(self.dart_client),
             PykrxFinancialFallbackProvider(self.collector),

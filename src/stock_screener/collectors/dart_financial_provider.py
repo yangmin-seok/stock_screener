@@ -6,10 +6,14 @@ from typing import Any
 import pandas as pd
 
 from stock_screener.collectors.dart_client import DartClient
-from stock_screener.collectors.fundamental_provider import FUNDAMENTAL_SOURCE_PRIORITY, FundamentalProviderConfig
+from stock_screener.collectors.fundamental_provider import (
+    FUNDAMENTAL_SOURCE_PRIORITY,
+    FundamentalProvider,
+    FundamentalProviderConfig,
+)
 
 
-class DartFinancialProvider:
+class DartFinancialProvider(FundamentalProvider):
     """Primary financial provider that normalizes DART payloads to internal schema."""
 
     config = FundamentalProviderConfig(source_name="dart_primary", priority_tier="primary")
@@ -59,7 +63,7 @@ class DartFinancialProvider:
 
     @classmethod
     def _normalize_fiscal_period(cls, frame: pd.DataFrame, period_type: pd.Series) -> pd.Series:
-        fiscal_period = cls._first_present(frame, ["fiscal_period", "accounting_period", "stlm_dt"]) 
+        fiscal_period = cls._first_present(frame, ["fiscal_period", "accounting_period", "stlm_dt"])
         fiscal_period = pd.to_datetime(fiscal_period, errors="coerce")
 
         year_series = cls._first_present(frame, ["bsns_year", "fiscal_year"]).astype("string")
