@@ -202,12 +202,40 @@ CREATE TABLE IF NOT EXISTS batch_checkpoint (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS financial_quality_daily (
+    asof_date TEXT NOT NULL,
+    metric_date TEXT NOT NULL,
+    chunk_idx INTEGER NOT NULL,
+    metric_scope TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT '',
+    fiscal_period TEXT NOT NULL DEFAULT '',
+    period_type TEXT NOT NULL DEFAULT '',
+    ticker TEXT NOT NULL DEFAULT '',
+    rows_total INTEGER NOT NULL,
+    eps_null INTEGER NOT NULL,
+    bps_null INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (
+        asof_date,
+        metric_date,
+        chunk_idx,
+        metric_scope,
+        provider,
+        source,
+        fiscal_period,
+        period_type,
+        ticker
+    )
+);
+
 CREATE INDEX IF NOT EXISTS idx_prices_ticker_date ON prices_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_cap_ticker_date ON cap_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_fund_ticker_date ON fundamental_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_fin_ticker_date ON financials_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_fin_periodic_ticker_period ON financials_periodic(ticker, fiscal_period);
 CREATE INDEX IF NOT EXISTS idx_snapshot_asof ON snapshot_metrics(asof_date);
+CREATE INDEX IF NOT EXISTS idx_fin_quality_asof_scope ON financial_quality_daily(asof_date, metric_scope);
 """
 
 
@@ -297,6 +325,9 @@ def init_db(db_path: str | Path) -> None:
         _ensure_column(conn, "snapshot_metrics", "financial_source", "TEXT")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_fin_periodic_ticker_period ON financials_periodic(ticker, fiscal_period)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_fin_quality_asof_scope ON financial_quality_daily(asof_date, metric_scope)"
         )
         conn.commit()
 
