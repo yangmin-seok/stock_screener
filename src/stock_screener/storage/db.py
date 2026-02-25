@@ -140,6 +140,9 @@ CREATE TABLE IF NOT EXISTS snapshot_metrics (
     ps_ratio REAL,
     pb_ratio REAL,
     peg_ratio REAL,
+    ps REAL,
+    peg REAL,
+    ev REAL,
     ev_sales REAL,
     ev_ebitda REAL,
     gross_margin REAL,
@@ -247,6 +250,9 @@ def init_db(db_path: str | Path) -> None:
         _ensure_column(conn, "snapshot_metrics", "ps_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "pb_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "peg_ratio", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "ps", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "peg", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "ev", "REAL")
         _ensure_column(conn, "snapshot_metrics", "ev_sales", "REAL")
         _ensure_column(conn, "snapshot_metrics", "ev_ebitda", "REAL")
         _ensure_column(conn, "snapshot_metrics", "gross_margin", "REAL")

@@ -65,6 +65,11 @@ def test_build_snapshot_includes_expanded_fundamental_metrics_with_nan_fallback(
     assert row["pe_ratio"] == 10.0
     assert np.isnan(row["forward_pe"])
     assert row["ps_ratio"] > 0
+    assert row["ps"] == row["ps_ratio"]
     assert row["operating_margin"] > 0
+    assert row["peg"] == row["peg_ratio"] or (np.isnan(row["peg"]) and np.isnan(row["peg_ratio"]))
+    assert np.isnan(row["ev"])
+    assert np.isnan(row["ev_sales"])
+    assert np.isnan(row["ev_ebitda"])
     assert np.isnan(row["debt_equity"])
     assert row["payout_ratio"] == 0.5
