@@ -131,7 +131,28 @@ CREATE TABLE IF NOT EXISTS snapshot_metrics (
     eps_cagr_5y REAL,
     eps_yoy_q REAL,
     eps_growth_ttm REAL,
+    eps_qoq REAL,
     sales_growth_qoq REAL,
+    sales_growth_ttm REAL,
+    sales_cagr_5y REAL,
+    pe_ratio REAL,
+    forward_pe REAL,
+    ps_ratio REAL,
+    pb_ratio REAL,
+    peg_ratio REAL,
+    ev_sales REAL,
+    ev_ebitda REAL,
+    gross_margin REAL,
+    operating_margin REAL,
+    net_margin REAL,
+    roa REAL,
+    roe REAL,
+    roic REAL,
+    debt_equity REAL,
+    lt_debt_equity REAL,
+    current_ratio REAL,
+    quick_ratio REAL,
+    payout_ratio REAL,
     eps_cagr_5y_window_years INTEGER,
     eps_cagr_5y_asof TEXT,
     eps_cagr_5y_sample_count INTEGER,
@@ -217,7 +238,28 @@ def init_db(db_path: str | Path) -> None:
         _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_yoy_q", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_growth_ttm", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "eps_qoq", "REAL")
         _ensure_column(conn, "snapshot_metrics", "sales_growth_qoq", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "sales_growth_ttm", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "sales_cagr_5y", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "pe_ratio", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "forward_pe", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "ps_ratio", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "pb_ratio", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "peg_ratio", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "ev_sales", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "ev_ebitda", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "gross_margin", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "operating_margin", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "net_margin", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "roa", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "roe", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "roic", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "debt_equity", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "lt_debt_equity", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "current_ratio", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "quick_ratio", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "payout_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y_window_years", "INTEGER")
         _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y_asof", "TEXT")
         _ensure_column(conn, "snapshot_metrics", "eps_cagr_5y_sample_count", "INTEGER")

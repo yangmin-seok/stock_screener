@@ -79,6 +79,14 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("eps_cagr_5y_min", "float", 0.15),
     FilterSpec("apply_eps_yoy_q", "bool", False),
     FilterSpec("eps_yoy_q_min", "float", 0.25),
+    FilterSpec("apply_eps_qoq", "bool", False),
+    FilterSpec("eps_qoq_min", "float", 0.1),
+    FilterSpec("apply_sales_growth_qoq", "bool", False),
+    FilterSpec("sales_growth_qoq_min", "float", 0.1),
+    FilterSpec("apply_sales_growth_ttm", "bool", False),
+    FilterSpec("sales_growth_ttm_min", "float", 0.1),
+    FilterSpec("apply_sales_cagr_5y", "bool", False),
+    FilterSpec("sales_cagr_5y_min", "float", 0.1),
     FilterSpec("apply_has_price_5y", "bool", False),
     FilterSpec("apply_has_price_10y", "bool", False),
     FilterSpec("above_200ma", "bool", False),
@@ -834,6 +842,15 @@ relative_value_available = "relative_value" in base.columns and base["relative_v
 available_momentum_metrics = [metric for metric in MOMENTUM_METRICS if metric in base.columns and base[metric].notna().any()]
 momentum_available = bool(available_momentum_metrics)
 
+fundamental_metric_availability = {
+    "eps_cagr_5y": "eps_cagr_5y" in base.columns and base["eps_cagr_5y"].notna().any(),
+    "eps_yoy_q": "eps_yoy_q" in base.columns and base["eps_yoy_q"].notna().any(),
+    "eps_qoq": "eps_qoq" in base.columns and base["eps_qoq"].notna().any(),
+    "sales_growth_qoq": "sales_growth_qoq" in base.columns and base["sales_growth_qoq"].notna().any(),
+    "sales_growth_ttm": "sales_growth_ttm" in base.columns and base["sales_growth_ttm"].notna().any(),
+    "sales_cagr_5y": "sales_cagr_5y" in base.columns and base["sales_cagr_5y"].notna().any(),
+}
+
 def _active_filter_count_from_state() -> int:
     return sum(
         [
@@ -852,6 +869,10 @@ def _active_filter_count_from_state() -> int:
             int(bool(st.session_state.get("above_200ma", False))),
             int(bool(st.session_state.get("apply_eps_cagr_5y", False))),
             int(bool(st.session_state.get("apply_eps_yoy_q", False))),
+            int(bool(st.session_state.get("apply_eps_qoq", False))),
+            int(bool(st.session_state.get("apply_sales_growth_qoq", False))),
+            int(bool(st.session_state.get("apply_sales_growth_ttm", False))),
+            int(bool(st.session_state.get("apply_sales_cagr_5y", False))),
             int(bool(st.session_state.get("apply_has_price_5y", False))),
             int(bool(st.session_state.get("apply_has_price_10y", False))),
             int(bool(st.session_state.get("apply_near_high", False))),
@@ -981,24 +1002,95 @@ with fundamental_tab:
         "최소 유보율(%)", step=50.0, disabled=not apply_reserve_ratio_min, key="reserve_ratio_min"
     )
 
-    apply_eps_cagr_5y = st.checkbox("최근 5년 EPS CAGR 조건 적용", key="apply_eps_cagr_5y")
+    if not fundamental_metric_availability["eps_cagr_5y"]:
+        st.session_state.apply_eps_cagr_5y = False
+    apply_eps_cagr_5y = st.checkbox(
+        "최근 5년 EPS CAGR 조건 적용",
+        key="apply_eps_cagr_5y",
+        disabled=not fundamental_metric_availability["eps_cagr_5y"],
+    )
     eps_cagr_5y_min = st.number_input(
         "최근 5년 EPS CAGR 최소",
-
         step=0.01,
         format="%.2f",
         disabled=not apply_eps_cagr_5y,
         key="eps_cagr_5y_min",
     )
 
-    apply_eps_yoy_q = st.checkbox("최근 분기 EPS YoY 조건 적용", key="apply_eps_yoy_q")
+    if not fundamental_metric_availability["eps_yoy_q"]:
+        st.session_state.apply_eps_yoy_q = False
+    apply_eps_yoy_q = st.checkbox(
+        "최근 분기 EPS YoY 조건 적용(호환키)",
+        key="apply_eps_yoy_q",
+        disabled=not fundamental_metric_availability["eps_yoy_q"],
+        help="기존 query/session 키 호환을 위해 유지되며, 값은 분기 EPS 성장률(Q/Q)과 동일하게 계산됩니다.",
+    )
     eps_yoy_q_min = st.number_input(
         "최근 분기 EPS YoY 최소",
-
         step=0.01,
         format="%.2f",
         disabled=not apply_eps_yoy_q,
         key="eps_yoy_q_min",
+    )
+
+    if not fundamental_metric_availability["eps_qoq"]:
+        st.session_state.apply_eps_qoq = False
+    apply_eps_qoq = st.checkbox(
+        "최근 분기 EPS Q/Q 조건 적용",
+        key="apply_eps_qoq",
+        disabled=not fundamental_metric_availability["eps_qoq"],
+    )
+    eps_qoq_min = st.number_input(
+        "최근 분기 EPS Q/Q 최소",
+        step=0.01,
+        format="%.2f",
+        disabled=not apply_eps_qoq,
+        key="eps_qoq_min",
+    )
+
+    if not fundamental_metric_availability["sales_growth_qoq"]:
+        st.session_state.apply_sales_growth_qoq = False
+    apply_sales_growth_qoq = st.checkbox(
+        "최근 분기 Sales Q/Q 조건 적용",
+        key="apply_sales_growth_qoq",
+        disabled=not fundamental_metric_availability["sales_growth_qoq"],
+    )
+    sales_growth_qoq_min = st.number_input(
+        "최근 분기 Sales Q/Q 최소",
+        step=0.01,
+        format="%.2f",
+        disabled=not apply_sales_growth_qoq,
+        key="sales_growth_qoq_min",
+    )
+
+    if not fundamental_metric_availability["sales_growth_ttm"]:
+        st.session_state.apply_sales_growth_ttm = False
+    apply_sales_growth_ttm = st.checkbox(
+        "Sales TTM 성장률 조건 적용",
+        key="apply_sales_growth_ttm",
+        disabled=not fundamental_metric_availability["sales_growth_ttm"],
+    )
+    sales_growth_ttm_min = st.number_input(
+        "Sales TTM 성장률 최소",
+        step=0.01,
+        format="%.2f",
+        disabled=not apply_sales_growth_ttm,
+        key="sales_growth_ttm_min",
+    )
+
+    if not fundamental_metric_availability["sales_cagr_5y"]:
+        st.session_state.apply_sales_cagr_5y = False
+    apply_sales_cagr_5y = st.checkbox(
+        "최근 5년 Sales CAGR 조건 적용",
+        key="apply_sales_cagr_5y",
+        disabled=not fundamental_metric_availability["sales_cagr_5y"],
+    )
+    sales_cagr_5y_min = st.number_input(
+        "최근 5년 Sales CAGR 최소",
+        step=0.01,
+        format="%.2f",
+        disabled=not apply_sales_cagr_5y,
+        key="sales_cagr_5y_min",
     )
 
     apply_has_price_5y = st.checkbox("가격 데이터 5Y 커버리지 종목만", key="apply_has_price_5y")
@@ -1123,6 +1215,14 @@ if apply_eps_cagr_5y:
     filtered = filtered[(filtered["eps_cagr_5y"].notna()) & (filtered["eps_cagr_5y"] >= eps_cagr_5y_min)]
 if apply_eps_yoy_q:
     filtered = filtered[(filtered["eps_yoy_q"].notna()) & (filtered["eps_yoy_q"] >= eps_yoy_q_min)]
+if apply_eps_qoq:
+    filtered = filtered[(filtered["eps_qoq"].notna()) & (filtered["eps_qoq"] >= eps_qoq_min)]
+if apply_sales_growth_qoq:
+    filtered = filtered[(filtered["sales_growth_qoq"].notna()) & (filtered["sales_growth_qoq"] >= sales_growth_qoq_min)]
+if apply_sales_growth_ttm:
+    filtered = filtered[(filtered["sales_growth_ttm"].notna()) & (filtered["sales_growth_ttm"] >= sales_growth_ttm_min)]
+if apply_sales_cagr_5y:
+    filtered = filtered[(filtered["sales_cagr_5y"].notna()) & (filtered["sales_cagr_5y"] >= sales_cagr_5y_min)]
 if apply_has_price_5y and "has_price_5y" in filtered.columns:
     filtered = filtered[filtered["has_price_5y"] == 1]
 if apply_has_price_10y and "has_price_10y" in filtered.columns:
@@ -1134,7 +1234,7 @@ sort_col = st.selectbox(
     "정렬 컬럼",
     [
         "mcap", "pbr", "reserve_ratio", "roe_proxy", "ret_3m", "ret_6m", "ret_1y", "near_52w_high_ratio", "div",
-        "avg_value_20d", "current_value", "relative_value", "eps_cagr_5y", "eps_yoy_q",
+        "avg_value_20d", "current_value", "relative_value", "eps_cagr_5y", "eps_yoy_q", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y",
     ],
     key="sort_col",
 )
@@ -1226,6 +1326,14 @@ if momentum_available and momentum_filter_mode != "Any":
     condition_summaries.append(
         f"{MOMENTUM_METRICS.get(momentum_metric, momentum_metric)} {_format_range_summary(momentum_filter_mode, momentum_bucket, momentum_min_custom, momentum_max_custom)}"
     )
+if st.session_state.get("apply_eps_qoq"):
+    condition_summaries.append(f"EPS Q/Q ≥ {st.session_state.get('eps_qoq_min', 0):.2f}")
+if st.session_state.get("apply_sales_growth_qoq"):
+    condition_summaries.append(f"Sales Q/Q ≥ {st.session_state.get('sales_growth_qoq_min', 0):.2f}")
+if st.session_state.get("apply_sales_growth_ttm"):
+    condition_summaries.append(f"Sales TTM ≥ {st.session_state.get('sales_growth_ttm_min', 0):.2f}")
+if st.session_state.get("apply_sales_cagr_5y"):
+    condition_summaries.append(f"Sales CAGR 5Y ≥ {st.session_state.get('sales_cagr_5y_min', 0):.2f}")
 if st.session_state.get("apply_has_price_5y"):
     condition_summaries.append("가격 5Y 커버리지")
 if st.session_state.get("apply_has_price_10y"):
@@ -1237,7 +1345,7 @@ if condition_summaries:
 show_cols = [
     "ticker", "name", "market", "close", "mcap", "avg_value_20d", "current_value", "relative_value", "pbr", "reserve_ratio", "per", "div", "dps",
     "eps", "bps", "fiscal_period", "period_type", "reported_date", "consolidation_type", "financial_source", "roe_proxy", "eps_positive", "ret_3m", "ret_6m", "ret_1y", "dist_sma200", "pos_52w",
-    "near_52w_high_ratio", "eps_cagr_5y", "eps_yoy_q", "has_price_5y", "has_price_10y",
+    "near_52w_high_ratio", "eps_cagr_5y", "eps_yoy_q", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y", "pe_ratio", "forward_pe", "ps_ratio", "pb_ratio", "peg_ratio", "ev_sales", "ev_ebitda", "gross_margin", "operating_margin", "net_margin", "roa", "roe", "roic", "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio", "has_price_5y", "has_price_10y",
 ]
 st.dataframe(
     filtered[show_cols],
