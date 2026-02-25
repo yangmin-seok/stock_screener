@@ -257,7 +257,14 @@ class DailyBatchPipeline:
         default_price_from_dt = dt - timedelta(days=lookback_days * 2)
         price_rows = 0
         price_failures = 0
+
+        def _raise_if_cancelled(*, phase: str) -> None:
+            if should_cancel and should_cancel():
+                logger.info("Daily batch cancel requested during %s", phase)
+                raise BatchCancelledError(f"Cancelled during {phase}")
+
         for idx, ticker in enumerate(tickers["ticker"], start=1):
+            _raise_if_cancelled(phase=f"price_collection:{idx}/{ticker_count}")
             if initial_backfill:
                 from_dt = default_price_from_dt
             else:
@@ -298,6 +305,7 @@ class DailyBatchPipeline:
         cap_from_dt = default_price_from_dt if initial_backfill else pd.to_datetime(self.repo.get_latest_price_date() or asof_str).date() - timedelta(days=10)
         trading_dates = self.collector.trading_dates(cap_from_dt, dt)
         for idx, trading_dt in enumerate(trading_dates, start=1):
+            _raise_if_cancelled(phase=f"cap_collection:{idx}/{len(trading_dates)}")
             cap_frame = self._safe_collect(self.collector.market_cap, trading_dt, label=f"market_cap:{trading_dt}")
             cap_rows += self.repo.upsert_cap(cap_frame)
             if idx % 30 == 0 or idx == len(trading_dates):
@@ -376,6 +384,7 @@ class DailyBatchPipeline:
                     chunk_to_dt,
                 )
                 for idx, fdt in enumerate(fund_dates, start=1):
+                    _raise_if_cancelled(phase=f"fundamental_collection:chunk={chunk_idx}/{chunks},date={idx}/{len(fund_dates)}")
                     fund_frame = self._safe_collect(
                         self.collector.fundamental_market_metrics,
                         fdt,
@@ -464,6 +473,16 @@ class DailyBatchPipeline:
                     self.repo.set_batch_checkpoint(checkpoint_key, str(chunk_idx + 1))
                 else:
                     self.repo.clear_batch_checkpoint(checkpoint_key)
+            except BatchCancelledError as exc:
+                self.repo.log_job_stage(
+                    run_id=run_id,
+                    stage=stage,
+                    status="cancelled",
+                    message=f"chunk={chunk_idx}/{chunks}, range={chunk_from_dt}~{chunk_to_dt}, cancelled={exc}",
+                )
+                self.repo.set_batch_checkpoint(checkpoint_key, str(chunk_idx))
+                logger.info("Fundamental chunk cancelled: chunk=%s/%s, reason=%s", chunk_idx, chunks, exc)
+                raise
             except Exception as exc:
                 self.repo.log_job_stage(
                     run_id=run_id,
