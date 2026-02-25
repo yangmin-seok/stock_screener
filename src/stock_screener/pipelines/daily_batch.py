@@ -10,8 +10,10 @@ from typing import Callable
 import pandas as pd
 
 from stock_screener.collectors.fundamental_provider import FundamentalProvider, merge_financial_records
+from stock_screener.collectors.dart_client import DartClient
 from stock_screener.collectors.naver_ratio_client import NaverRatioCollector
 from stock_screener.collectors.pykrx_client import PykrxCollector, PykrxFinancialFallbackProvider
+from stock_screener.config import get_required_env, load_env_file
 from stock_screener.features.metrics import build_snapshot
 from stock_screener.storage.db import init_db
 from stock_screener.storage.repository import Repository
@@ -41,9 +43,18 @@ class DailyBatchPipeline:
         self.repo = Repository(self.db_path)
         self.collector = PykrxCollector()
         self.ratio_collector = NaverRatioCollector()
+        load_env_file()
+        self.dart_client: DartClient | None = None
         self.financial_providers: list[FundamentalProvider] = [
             PykrxFinancialFallbackProvider(self.collector),
         ]
+
+
+    def _ensure_dart_client(self) -> None:
+        if self.dart_client is not None:
+            return
+        dart_api_key = get_required_env("DART_API_KEY")
+        self.dart_client = DartClient(api_key=dart_api_key)
 
     def update_reserve_ratio_only(self, asof_date: str | None = None) -> tuple[str, int]:
         if asof_date:
@@ -127,6 +138,8 @@ class DailyBatchPipeline:
         chunks = max(1, chunks)
         run_id = f"daily_batch:{asof_str}"
         checkpoint_key = f"fundamental_chunk:{asof_str}:{chunk_years}:{chunks}"
+        self._ensure_dart_client()
+
         logger.info(
             "Starting daily batch: asof=%s, lookback_days=%s, initial_backfill=%s, chunk_years=%s, chunks=%s, rebuild_snapshot=%s",
             asof_str,
