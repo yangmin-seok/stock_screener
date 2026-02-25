@@ -83,7 +83,7 @@ def test_daily_batch_financial_provider_order(monkeypatch, tmp_path):
 
 
 
-def test_daily_batch_uses_default_dart_endpoint_when_env_not_set(monkeypatch, tmp_path):
+def test_daily_batch_keeps_dart_endpoint_unset_when_env_not_set(monkeypatch, tmp_path):
     monkeypatch.setenv("DART_API_KEY", "dummy-key")
     monkeypatch.delenv("DART_FINANCIALS_ENDPOINT", raising=False)
 
@@ -91,7 +91,7 @@ def test_daily_batch_uses_default_dart_endpoint_when_env_not_set(monkeypatch, tm
     pipeline._ensure_dart_client()
 
     assert pipeline.dart_client is not None
-    assert pipeline.dart_client.endpoint == "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json"
+    assert pipeline.dart_client.endpoint is None
 
 
 def test_daily_batch_allows_dart_endpoint_override(monkeypatch, tmp_path):
