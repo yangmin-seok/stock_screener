@@ -262,7 +262,23 @@ class DailyBatchPipeline:
         if initial_backfill:
             base_from_dt = dt - timedelta(days=max(lookback_days, 3650) + 365)
         elif latest_fundamental:
-            base_from_dt = pd.to_datetime(latest_fundamental).date() - timedelta(days=31)
+            parsed_latest = pd.to_datetime(latest_fundamental, errors="coerce")
+            if pd.isna(parsed_latest):
+                logger.warning(
+                    "Invalid latest fundamental checkpoint: %s. Falling back to default fundamental window.",
+                    latest_fundamental,
+                )
+                base_from_dt = dt - timedelta(days=400)
+            else:
+                latest_fundamental_dt = parsed_latest.date()
+                if latest_fundamental_dt > dt:
+                    logger.warning(
+                        "Latest fundamental date is in the future (latest=%s, asof=%s). Clamping to asof for chunk window.",
+                        latest_fundamental_dt,
+                        dt,
+                    )
+                    latest_fundamental_dt = dt
+                base_from_dt = latest_fundamental_dt - timedelta(days=31)
         else:
             base_from_dt = dt - timedelta(days=400)
 
@@ -281,6 +297,14 @@ class DailyBatchPipeline:
             chunk_from_dt = max(base_from_dt, chunk_start)
             chunk_to_dt = min(dt, chunk_end)
             if chunk_from_dt > chunk_to_dt:
+                logger.warning(
+                    "Skipping fundamental chunk due to empty range: chunk=%s/%s, base_from=%s, chunk_from=%s, chunk_to=%s",
+                    chunk_idx,
+                    chunks,
+                    base_from_dt,
+                    chunk_from_dt,
+                    chunk_to_dt,
+                )
                 continue
 
             stage = f"fundamental_chunk_{chunk_idx}"
