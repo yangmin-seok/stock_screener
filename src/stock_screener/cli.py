@@ -5,6 +5,40 @@ import logging
 from pathlib import Path
 
 from stock_screener.pipelines.daily_batch import DailyBatchPipeline
+from stock_screener.storage.db import init_db
+from stock_screener.storage.repository import Repository
+
+
+def _print_latest_batch_report(db_path: Path) -> None:
+    init_db(db_path)
+    repo = Repository(db_path)
+    rows = repo.get_latest_batch_chunk_report("daily_batch:")
+    if not rows:
+        print("No daily_batch run found in job_log.")
+        return
+
+    run_id = rows[0]["run_id"]
+    print(f"Latest run_id: {run_id}")
+    print(
+        "chunk | status  | row_count | eps_non_null          | bps_non_null          | revenue_non_null      | message"
+    )
+    print(
+        "------|---------|-----------|------------------------|-----------------------|-----------------------|--------"
+    )
+    for row in rows:
+        chunk_text = "-"
+        if row["chunk_idx"] is not None and row["chunk_total"] is not None:
+            chunk_text = f"{row['chunk_idx']}/{row['chunk_total']}"
+        message = row["message"] or ""
+        print(
+            f"{chunk_text:<5} | "
+            f"{row['status']:<7} | "
+            f"{(row['row_count'] if row['row_count'] is not None else '-'):>9} | "
+            f"{row['eps_ratio']:<22} | "
+            f"{row['bps_ratio']:<21} | "
+            f"{row['revenue_ratio']:<21} | "
+            f"{message}"
+        )
 
 
 def main() -> None:
@@ -23,6 +57,11 @@ def main() -> None:
         action="store_true",
         help="When used with --update-reserve-only, rebuild snapshot_metrics right after reserve update",
     )
+    parser.add_argument(
+        "--report-latest-batch",
+        action="store_true",
+        help="Print latest daily_batch:* chunk status report from job_log",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -30,7 +69,12 @@ def main() -> None:
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
 
-    pipeline = DailyBatchPipeline(Path(args.db_path))
+    db_path = Path(args.db_path)
+    if args.report_latest_batch:
+        _print_latest_batch_report(db_path)
+        return
+
+    pipeline = DailyBatchPipeline(db_path)
     if args.update_reserve_only:
         updated_asof, rows = pipeline.update_reserve_ratio_only(asof_date=args.asof_date)
         print(f"reserve_ratio updated: asof={updated_asof}, rows={rows}")

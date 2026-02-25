@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
+from typing import Any
 
 import pandas as pd
 
@@ -16,6 +18,39 @@ class Repository:
         data = frame[columns].copy()
         data = data.where(pd.notna(data), None)
         return [tuple(row) for row in data.itertuples(index=False, name=None)]
+
+    @staticmethod
+    def _parse_quality_metric(message: str | None, key: str) -> tuple[int | None, int | None]:
+        if not message:
+            return None, None
+
+        slash_match = re.search(rf"{re.escape(key)}=(\d+)\s*/\s*(\d+)", message)
+        if slash_match:
+            return int(slash_match.group(1)), int(slash_match.group(2))
+
+        value_match = re.search(rf"{re.escape(key)}=(\d+)", message)
+        total_match = re.search(rf"{re.escape(key)}_total=(\d+)", message)
+        if not value_match:
+            return None, int(total_match.group(1)) if total_match else None
+        return int(value_match.group(1)), int(total_match.group(1)) if total_match else None
+
+    @staticmethod
+    def _parse_chunk_index(message: str | None) -> tuple[int | None, int | None]:
+        if not message:
+            return None, None
+        match = re.search(r"chunk=(\d+)\s*/\s*(\d+)", message)
+        if not match:
+            return None, None
+        return int(match.group(1)), int(match.group(2))
+
+    @staticmethod
+    def _ratio_text(value: int | None, denominator: int | None) -> str:
+        if value is None:
+            return "-"
+        if denominator is None or denominator <= 0:
+            return str(value)
+        ratio = (value / denominator) * 100
+        return f"{value}/{denominator} ({ratio:.1f}%)"
 
     def upsert_tickers(self, frame: pd.DataFrame) -> int:
         if frame.empty:
@@ -504,6 +539,71 @@ class Repository:
         with db_session(self.db_path) as conn:
             row = conn.execute("SELECT MAX(asof_date) AS d FROM snapshot_metrics").fetchone()
         return row[0] if row and row[0] else None
+
+    def get_latest_batch_chunk_report(self, run_prefix: str = "daily_batch:") -> list[dict[str, Any]]:
+        with db_session(self.db_path) as conn:
+            run_row = conn.execute(
+                """
+                SELECT run_id
+                FROM job_log
+                WHERE run_id LIKE ?
+                ORDER BY run_id DESC
+                LIMIT 1
+                """,
+                (f"{run_prefix}%",),
+            ).fetchone()
+
+            if not run_row:
+                return []
+
+            run_id = str(run_row[0])
+            stage_rows = conn.execute(
+                """
+                SELECT run_id, stage, status, started_at, ended_at, row_count, message
+                FROM job_log
+                WHERE run_id = ?
+                  AND stage LIKE 'fundamental_chunk_%'
+                ORDER BY stage
+                """,
+                (run_id,),
+            ).fetchall()
+
+        report_rows: list[dict[str, Any]] = []
+        for row in stage_rows:
+            message = row[6]
+            chunk_idx, chunk_total = self._parse_chunk_index(message)
+
+            eps_value, eps_total = self._parse_quality_metric(message, "eps_non_null")
+            bps_value, bps_total = self._parse_quality_metric(message, "bps_non_null")
+            revenue_value, revenue_total = self._parse_quality_metric(message, "revenue_non_null")
+
+            fallback_denominator = int(row[5]) if row[5] is not None else None
+            eps_denominator = eps_total if eps_total is not None else fallback_denominator
+            bps_denominator = bps_total if bps_total is not None else fallback_denominator
+            revenue_denominator = revenue_total if revenue_total is not None else fallback_denominator
+
+            report_rows.append(
+                {
+                    "run_id": str(row[0]),
+                    "stage": str(row[1]),
+                    "status": str(row[2]),
+                    "started_at": row[3],
+                    "ended_at": row[4],
+                    "row_count": fallback_denominator,
+                    "message": message,
+                    "chunk_idx": chunk_idx,
+                    "chunk_total": chunk_total,
+                    "eps_non_null": eps_value,
+                    "bps_non_null": bps_value,
+                    "revenue_non_null": revenue_value,
+                    "eps_ratio": self._ratio_text(eps_value, eps_denominator),
+                    "bps_ratio": self._ratio_text(bps_value, bps_denominator),
+                    "revenue_ratio": self._ratio_text(revenue_value, revenue_denominator),
+                }
+            )
+
+        report_rows.sort(key=lambda item: (item["chunk_idx"] is None, item["chunk_idx"] or 0))
+        return report_rows
 
     def load_snapshot(self, asof_date: str) -> pd.DataFrame:
         with db_session(self.db_path) as conn:

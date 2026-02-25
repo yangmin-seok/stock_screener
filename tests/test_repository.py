@@ -197,3 +197,73 @@ def test_upsert_financial_tables_accept_dart_normalized_rows(tmp_path):
     assert float(periodic["eps"]) == 12.5
     assert float(periodic["bps"]) == 150.7
     assert int(periodic["source_priority"]) == 300
+
+
+def test_get_latest_batch_chunk_report_parses_quality_metrics(tmp_path):
+    db = tmp_path / "x.db"
+    init_db(db)
+    repo = Repository(db)
+
+    repo.log_job_stage(
+        run_id="daily_batch:2026-02-20",
+        stage="fundamental_chunk_1",
+        status="success",
+        row_count=120,
+        message=(
+            "chunk=1/2, range=2024-01-01~2024-12-31, "
+            "eps_non_null=80, bps_non_null=70, revenue_non_null=90"
+        ),
+    )
+    repo.log_job_stage(
+        run_id="daily_batch:2026-02-20",
+        stage="fundamental_chunk_2",
+        status="failed",
+        row_count=100,
+        message=(
+            "chunk=2/2, range=2023-01-01~2023-12-31, "
+            "eps_non_null=40/100, bps_non_null=50/100, revenue_non_null=60/100"
+        ),
+    )
+
+    rows = repo.get_latest_batch_chunk_report()
+
+    assert len(rows) == 2
+    assert rows[0]["chunk_idx"] == 1
+    assert rows[0]["status"] == "success"
+    assert rows[0]["eps_non_null"] == 80
+    assert rows[0]["eps_ratio"] == "80/120 (66.7%)"
+    assert rows[0]["bps_ratio"] == "70/120 (58.3%)"
+    assert rows[0]["revenue_ratio"] == "90/120 (75.0%)"
+
+    assert rows[1]["chunk_idx"] == 2
+    assert rows[1]["status"] == "failed"
+    assert rows[1]["eps_non_null"] == 40
+    assert rows[1]["eps_ratio"] == "40/100 (40.0%)"
+    assert rows[1]["bps_ratio"] == "50/100 (50.0%)"
+    assert rows[1]["revenue_ratio"] == "60/100 (60.0%)"
+
+
+def test_get_latest_batch_chunk_report_returns_latest_run(tmp_path):
+    db = tmp_path / "x.db"
+    init_db(db)
+    repo = Repository(db)
+
+    repo.log_job_stage(
+        run_id="daily_batch:2026-02-19",
+        stage="fundamental_chunk_1",
+        status="success",
+        row_count=10,
+        message="chunk=1/1, eps_non_null=7",
+    )
+    repo.log_job_stage(
+        run_id="daily_batch:2026-02-20",
+        stage="fundamental_chunk_1",
+        status="success",
+        row_count=20,
+        message="chunk=1/1, eps_non_null=11",
+    )
+
+    rows = repo.get_latest_batch_chunk_report()
+    assert len(rows) == 1
+    assert rows[0]["run_id"] == "daily_batch:2026-02-20"
+    assert rows[0]["eps_ratio"] == "11/20 (55.0%)"
