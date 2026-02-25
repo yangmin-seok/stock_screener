@@ -28,14 +28,20 @@
 ## PR checklist
 - Include summary, key behavior changes, and validation commands.
 - Call out compatibility notes for query params/session state when relevant.
+- Explicitly verify query/session key backward compatibility when filter/state keys are changed.
+- If snapshot schema/columns changed, confirm DB migration path (`init_db`/`_ensure_column`) before merge.
 
 ## Fundamental handoff notes (2026-02)
 
 ### Current status
-- Quarterly financial canonicalization is **not implemented yet**.
-  - `financials_daily` currently stores collected rows keyed by `(date, ticker, fiscal_period, period_type, consolidation_type)`.
-  - This means identical fiscal periods can exist across multiple collection dates.
-- `EPS/BPS` are being populated via `PykrxFinancialFallbackProvider`; nulls are still observed in production snapshots and need diagnosis.
+- DART primary provider + pykrx fallback provider are connected and running in production batch path.
+  - Financial merge priority is applied as `is_correction > reported_date > source_priority`.
+- Quarterly financial canonicalization is **implemented and 운영 중** via `financials_periodic`.
+  - `financials_daily` remains collection/audit history keyed by collection date.
+  - Growth/snapshot paths consume periodic axis data (`fiscal_period`, `period_type`) with dedupe/tie-break rules.
+- EPS/BPS null observability is **강화 완료/운영 중**.
+  - Batch logs include source output, merged output, and pre-upsert null/non-null counts by chunk/date.
+- Remaining issue: upstream source gaps can still produce snapshot-level `eps`, `bps` nulls on 일부 종목.
 
 ### Known risks
 - Growth metrics can be biased if repeated fiscal periods are treated as independent time points.
@@ -43,20 +49,15 @@
 - Snapshot-level `eps`, `bps` can remain null when upstream source is missing or when merge/upsert leaves gaps.
 
 ### Next-agent implementation plan
-1. **Introduce canonical periodic financial storage**
-   - Add a periodic/canonical table (e.g., `financials_periodic`) keyed by
-     `(ticker, fiscal_period, period_type, consolidation_type)`.
-   - Keep `financials_daily` as collection/audit history.
-2. **Switch growth inputs to fiscal period axis**
-   - In growth computation paths, sort/index by `fiscal_period` (with `period_type` guards),
-     not by collection `date`.
-   - Enforce dedupe rules for same fiscal period: correction/latest report/source priority.
-3. **Add EPS/BPS null observability**
-   - Log null ratios at (a) source collection, (b) post-merge, (c) pre-upsert.
-   - Include chunk/date-level counts in batch logs for quick diagnosis.
-4. **Stabilize snapshot latest-financial selection rule**
-   - Make tie-breakers explicit when selecting one latest financial row for snapshot (`reported_date`, corrections, source priority).
-   - Keep current output keys for backward compatibility (`fiscal_period`, `period_type`, `reported_date`, `financial_source`).
+1. **EPS/BPS null 원인 분석 및 보정 전략 고도화 (미완료)**
+   - Null 관측 지표를 기반으로 source/종목/기간별 결측 패턴을 정량화.
+   - merge/upsert 이후 null이 증가하는 케이스를 분리해 재현 가능한 회귀 테스트 추가.
+2. **Snapshot latest-financial selection 운영 규칙 명문화 (부분 완료, 추가 작업 필요)**
+   - 현재 tie-breaker(`is_correction > reported_date > source_priority`)를 운영 문서/테스트에 고정.
+   - 예외 케이스(동일 reported_date 다중 소스, 결측 reported_date)에 대한 deterministic 규칙 보강.
+3. **Finviz-style quarterly/TTM 필터 검증 강화 (미완료)**
+   - fiscal-period 정규화 데이터 기준으로 Q/Q, TTM 필터 산출값 검증 테스트 확장.
+   - UI 노출 필터와 백엔드 계산식 간 불일치 여부를 릴리스 전 체크리스트에 포함.
 
 ### 10-year backfill operating SOP (2 years x 5 chunks)
 - Execute long historical collection in chunks: `chunk_years=2`, `chunks=5`.
