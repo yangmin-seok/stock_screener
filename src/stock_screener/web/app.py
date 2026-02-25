@@ -435,7 +435,7 @@ def _render_active_job_panel() -> None:
         return
 
     elapsed = int(time.time() - active_job["started_at"])
-    cancel_suffix = " | 취소 요청됨(현재 chunk 마무리 후 종료)" if active_job.get("cancel_requested") else ""
+    cancel_suffix = " | 취소 요청됨(다음 안전 체크포인트에서 중단)" if active_job.get("cancel_requested") else ""
     st.info(f"{active_job['label']} 실행 중... ({elapsed}초 경과){cancel_suffix}")
     c1, c2 = st.columns([1, 1])
     with c1:
@@ -451,7 +451,7 @@ def _render_active_job_panel() -> None:
             st.session_state.last_job_message = {
                 "status": "cancelled",
                 "job_type": active_job["job_type"],
-                "message": f"{active_job['label']} 취소 요청을 보냈습니다. 현재 chunk 완료 후 안전 중단됩니다.",
+                "message": f"{active_job['label']} 취소 요청을 보냈습니다. 다음 안전 체크포인트에서 중단됩니다.",
             }
             _safe_rerun()
 
