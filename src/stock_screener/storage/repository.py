@@ -608,13 +608,13 @@ class Repository:
                 INSERT INTO job_log(run_id, stage, status, started_at, ended_at, message, row_count)
                 VALUES (
                     ?, ?, ?, CURRENT_TIMESTAMP,
-                    CASE WHEN ? IN ('success', 'failed') THEN CURRENT_TIMESTAMP ELSE NULL END,
+                    CASE WHEN ? IN ('success', 'failed', 'cancelled') THEN CURRENT_TIMESTAMP ELSE NULL END,
                     ?, ?
                 )
                 ON CONFLICT(run_id, stage) DO UPDATE SET
                     status=excluded.status,
                     ended_at=CASE
-                        WHEN excluded.status IN ('success', 'failed') THEN CURRENT_TIMESTAMP
+                        WHEN excluded.status IN ('success', 'failed', 'cancelled') THEN CURRENT_TIMESTAMP
                         ELSE job_log.ended_at
                     END,
                     message=excluded.message,
