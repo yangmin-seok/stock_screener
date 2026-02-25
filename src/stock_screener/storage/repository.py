@@ -325,12 +325,29 @@ class Repository:
             return pd.read_sql_query(query, conn, params=(dt, dt, dt, dt))
 
     def get_fundamental_window(self, end_date: str, years: int = 6) -> pd.DataFrame:
+        """Backward-compatible alias: prefers periodic fundamental source for growth windows."""
+        return self.get_fundamental_window_periodic(end_date=end_date, years=years)
+
+    def get_fundamental_window_periodic(self, end_date: str, years: int = 6) -> pd.DataFrame:
         query = """
-        SELECT date, ticker, revenue, eps, bps, fiscal_period, period_type, reported_date, consolidation_type, source
-        FROM financials_daily
-        WHERE date <= ?
-          AND date >= date(?, ?)
-        ORDER BY ticker, date
+        SELECT
+            NULL AS date,
+            ticker,
+            revenue,
+            eps,
+            bps,
+            fiscal_period,
+            period_type,
+            reported_date,
+            consolidation_type,
+            source,
+            source_ts,
+            is_correction,
+            source_priority
+        FROM financials_periodic
+        WHERE COALESCE(reported_date, fiscal_period) <= ?
+          AND COALESCE(reported_date, fiscal_period) >= date(?, ?)
+        ORDER BY ticker, period_type, fiscal_period
         """
         with db_session(self.db_path) as conn:
             return pd.read_sql_query(query, conn, params=(end_date, end_date, f"-{years} years"))

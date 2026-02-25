@@ -18,14 +18,84 @@ class GrowthResult:
 
 def _to_numeric_series(frame: pd.DataFrame, value_col: str) -> pd.Series:
     if frame.empty:
-        return pd.Series(dtype=float)
-    ordered = frame[["date", value_col]].copy()
-    ordered["date"] = pd.to_datetime(ordered["date"])
+        return pd.Series(dtype=float, index=pd.DatetimeIndex([]))
+    ordered = frame[["fiscal_period", "period_type", value_col]].copy()
     ordered[value_col] = pd.to_numeric(ordered[value_col], errors="coerce")
-    ordered = ordered.dropna(subset=[value_col]).sort_values("date")
+    ordered["fiscal_period_ts"] = _fiscal_period_to_timestamp(ordered["fiscal_period"], ordered["period_type"])
+    ordered = ordered.dropna(subset=[value_col, "fiscal_period_ts"]).sort_values("fiscal_period_ts")
     if ordered.empty:
-        return pd.Series(dtype=float)
-    return pd.Series(ordered[value_col].values, index=ordered["date"])
+        return pd.Series(dtype=float, index=pd.DatetimeIndex([]))
+    return pd.Series(ordered[value_col].values, index=ordered["fiscal_period_ts"])
+
+
+def _fiscal_period_to_timestamp(fiscal_period: pd.Series, period_type: pd.Series) -> pd.Series:
+    fiscal_period = fiscal_period.astype(str).str.strip()
+    period_type = period_type.astype(str).str.strip().str.lower()
+    out = pd.Series(pd.NaT, index=fiscal_period.index, dtype="datetime64[ns]")
+
+    quarterly_mask = period_type.isin({"quarterly", "q", "quarter"})
+    if quarterly_mask.any():
+        q_series = fiscal_period[quarterly_mask]
+        extracted = q_series.str.extract(r"(?P<year>\d{4}).*?[Qq](?P<q>[1-4])")
+        q_ts = pd.Series(pd.NaT, index=q_series.index, dtype="datetime64[ns]")
+        valid = extracted["year"].notna() & extracted["q"].notna()
+        if valid.any():
+            periods = pd.PeriodIndex.from_fields(
+                year=extracted.loc[valid, "year"].astype(int),
+                quarter=extracted.loc[valid, "q"].astype(int),
+                freq="Q",
+            )
+            q_ts.loc[valid] = periods.to_timestamp(how="end")
+        q_ts.loc[~valid] = pd.to_datetime(q_series.loc[~valid], errors="coerce")
+        out.loc[quarterly_mask] = q_ts
+
+    annual_mask = period_type.isin({"annual", "yearly", "y", "year"})
+    if annual_mask.any():
+        y_series = fiscal_period[annual_mask]
+        years = y_series.str.extract(r"(?P<year>\d{4})")["year"]
+        y_ts = pd.Series(pd.NaT, index=y_series.index, dtype="datetime64[ns]")
+        valid = years.notna()
+        if valid.any():
+            y_ts.loc[valid] = pd.PeriodIndex.from_fields(year=years.loc[valid].astype(int), freq="Y").to_timestamp(how="end")
+        y_ts.loc[~valid] = pd.to_datetime(y_series.loc[~valid], errors="coerce")
+        out.loc[annual_mask] = y_ts
+
+    other_mask = ~(quarterly_mask | annual_mask)
+    if other_mask.any():
+        out.loc[other_mask] = pd.to_datetime(fiscal_period.loc[other_mask], errors="coerce")
+    return out
+
+
+def _preprocess_periodic_history(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame.copy()
+    prepared = frame.copy()
+    for col, default in (("source_priority", 0), ("is_correction", 0)):
+        if col not in prepared.columns:
+            prepared[col] = default
+    prepared["source_priority"] = pd.to_numeric(prepared["source_priority"], errors="coerce").fillna(0)
+    prepared["is_correction"] = pd.to_numeric(prepared["is_correction"], errors="coerce").fillna(0)
+    prepared["reported_date"] = pd.to_datetime(prepared.get("reported_date"), errors="coerce")
+    prepared["date"] = pd.to_datetime(prepared.get("date"), errors="coerce")
+    prepared["source_ts"] = pd.to_datetime(prepared.get("source_ts"), errors="coerce")
+
+    dedupe_keys = ["ticker", "fiscal_period", "period_type", "consolidation_type"]
+    for key in dedupe_keys:
+        if key not in prepared.columns:
+            prepared[key] = None
+
+    prepared = prepared.sort_values(
+        by=[*dedupe_keys, "is_correction", "reported_date", "date", "source_priority", "source_ts"],
+        ascending=[True, True, True, True, False, False, False, False, False],
+    )
+    return prepared.drop_duplicates(subset=dedupe_keys, keep="first")
+
+
+def _filter_period_type(frame: pd.DataFrame, allowed: set[str]) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    normalized = frame["period_type"].astype(str).str.lower().str.strip()
+    return frame[normalized.isin(allowed)].copy()
 
 
 def _nearest_on_or_before(series: pd.Series, target: pd.Timestamp) -> float:
@@ -42,8 +112,10 @@ def _normalize_growth(value: float) -> float | None:
     return float(np.clip(value, low, high))
 
 
-def calc_cagr(series: pd.Series, asof: str, window_years: int) -> GrowthResult:
+def calc_cagr(series: pd.Series, asof: str, window_years: int, *, period_type: str | None = None) -> GrowthResult:
     """Sample requirements: at least window_years + 1 annual points and positive start/end values."""
+    if period_type and period_type.lower() not in {"annual", "yearly", "y", "year"}:
+        return GrowthResult(None, window_years, asof, 0)
     asof_ts = pd.Timestamp(asof)
     valid = series[series.index <= asof_ts]
     sample_count = int(valid.shape[0])
@@ -60,8 +132,10 @@ def calc_cagr(series: pd.Series, asof: str, window_years: int) -> GrowthResult:
     return GrowthResult(_normalize_growth(value), window_years, asof, sample_count)
 
 
-def calc_yoy(series: pd.Series, asof: str) -> GrowthResult:
+def calc_yoy(series: pd.Series, asof: str, *, period_type: str | None = None) -> GrowthResult:
     """Sample requirements: at least 2 points; prior-year denominator must be non-zero."""
+    if period_type and period_type.lower() not in {"annual", "yearly", "y", "year"}:
+        return GrowthResult(None, 1, asof, 0)
     asof_ts = pd.Timestamp(asof)
     valid = series[series.index <= asof_ts]
     sample_count = int(valid.shape[0])
@@ -77,8 +151,10 @@ def calc_yoy(series: pd.Series, asof: str) -> GrowthResult:
     return GrowthResult(_normalize_growth(current / prev - 1), 1, asof, sample_count)
 
 
-def calc_qoq(series: pd.Series, asof: str) -> GrowthResult:
+def calc_qoq(series: pd.Series, asof: str, *, period_type: str | None = None) -> GrowthResult:
     """Sample requirements: at least 2 quarterly points; prior-quarter denominator must be non-zero."""
+    if period_type and period_type.lower() not in {"quarterly", "q", "quarter"}:
+        return GrowthResult(None, None, asof, 0)
     asof_ts = pd.Timestamp(asof)
     valid = series[series.index <= asof_ts]
     sample_count = int(valid.shape[0])
@@ -95,8 +171,10 @@ def calc_qoq(series: pd.Series, asof: str) -> GrowthResult:
     return GrowthResult(_normalize_growth(current / prev - 1), window_years, asof, sample_count)
 
 
-def calc_ttm_growth(series: pd.Series, asof: str) -> GrowthResult:
+def calc_ttm_growth(series: pd.Series, asof: str, *, period_type: str | None = None) -> GrowthResult:
     """Sample requirements: >=8 quarterly points (4 current + 4 prior); prior TTM denominator must be non-zero."""
+    if period_type and period_type.lower() not in {"quarterly", "q", "quarter"}:
+        return GrowthResult(None, 1, asof, 0)
     asof_ts = pd.Timestamp(asof)
     valid = series[series.index <= asof_ts]
     sample_count = int(valid.shape[0])
@@ -111,14 +189,6 @@ def calc_ttm_growth(series: pd.Series, asof: str) -> GrowthResult:
     return GrowthResult(_normalize_growth(current_ttm / prev_ttm - 1), 1, asof, sample_count)
 
 
-FINVIZ_GROWTH_FORMULAS = {
-    "eps_growth_past_5y": lambda series, asof: calc_cagr(series, asof=asof, window_years=5),
-    "sales_growth_qtr_over_qtr": lambda series, asof: calc_qoq(series, asof=asof),
-    "eps_growth_ttm": lambda series, asof: calc_ttm_growth(series, asof=asof),
-    "eps_growth_this_year_over_year": lambda series, asof: calc_yoy(series, asof=asof),
-}
-
-
 def compute_growth_bundle(fund_hist: pd.DataFrame, ticker: str, asof: str) -> dict[str, GrowthResult]:
     subset = fund_hist[fund_hist["ticker"] == ticker].copy()
     if subset.empty:
@@ -129,12 +199,17 @@ def compute_growth_bundle(fund_hist: pd.DataFrame, ticker: str, asof: str) -> di
             "eps_growth_this_year_over_year": GrowthResult(None, 1, asof, 0),
         }
 
-    eps_series = _to_numeric_series(subset, "eps")
-    rev_series = _to_numeric_series(subset, "revenue")
+    deduped = _preprocess_periodic_history(subset)
+    annual = _filter_period_type(deduped, {"annual", "yearly", "y", "year"})
+    quarterly = _filter_period_type(deduped, {"quarterly", "q", "quarter"})
+
+    eps_annual_series = _to_numeric_series(annual, "eps")
+    eps_quarterly_series = _to_numeric_series(quarterly, "eps")
+    rev_quarterly_series = _to_numeric_series(quarterly, "revenue")
 
     return {
-        "eps_growth_past_5y": FINVIZ_GROWTH_FORMULAS["eps_growth_past_5y"](eps_series, asof),
-        "sales_growth_qtr_over_qtr": FINVIZ_GROWTH_FORMULAS["sales_growth_qtr_over_qtr"](rev_series, asof),
-        "eps_growth_ttm": FINVIZ_GROWTH_FORMULAS["eps_growth_ttm"](eps_series, asof),
-        "eps_growth_this_year_over_year": FINVIZ_GROWTH_FORMULAS["eps_growth_this_year_over_year"](eps_series, asof),
+        "eps_growth_past_5y": calc_cagr(eps_annual_series, asof=asof, window_years=5, period_type="annual"),
+        "sales_growth_qtr_over_qtr": calc_qoq(rev_quarterly_series, asof=asof, period_type="quarterly"),
+        "eps_growth_ttm": calc_ttm_growth(eps_quarterly_series, asof=asof, period_type="quarterly"),
+        "eps_growth_this_year_over_year": calc_yoy(eps_annual_series, asof=asof, period_type="annual"),
     }
