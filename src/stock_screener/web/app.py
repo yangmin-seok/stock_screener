@@ -96,6 +96,30 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("above_200ma", "bool", False),
     FilterSpec("apply_near_high", "bool", False),
     FilterSpec("near_high_min", "float", 0.9),
+    FilterSpec("rsi_filter_mode", "str", "Any"),
+    FilterSpec("rsi_bucket", "str", "전체"),
+    FilterSpec("rsi_min_custom", "float", 0.0),
+    FilterSpec("rsi_max_custom", "float", 0.0),
+    FilterSpec("atr_filter_mode", "str", "Any"),
+    FilterSpec("atr_bucket", "str", "전체"),
+    FilterSpec("atr_min_custom", "float", 0.0),
+    FilterSpec("atr_max_custom", "float", 0.0),
+    FilterSpec("gap_filter_mode", "str", "Any"),
+    FilterSpec("gap_bucket", "str", "전체"),
+    FilterSpec("gap_min_custom", "float", 0.0),
+    FilterSpec("gap_max_custom", "float", 0.0),
+    FilterSpec("chg_open_filter_mode", "str", "Any"),
+    FilterSpec("chg_open_bucket", "str", "전체"),
+    FilterSpec("chg_open_min_custom", "float", 0.0),
+    FilterSpec("chg_open_max_custom", "float", 0.0),
+    FilterSpec("volatility_filter_mode", "str", "Any"),
+    FilterSpec("volatility_bucket", "str", "전체"),
+    FilterSpec("volatility_min_custom", "float", 0.0),
+    FilterSpec("volatility_max_custom", "float", 0.0),
+    FilterSpec("foreign_buy_filter_mode", "str", "Any"),
+    FilterSpec("foreign_buy_bucket", "str", "전체"),
+    FilterSpec("foreign_buy_min_custom", "float", 0.0),
+    FilterSpec("foreign_buy_max_custom", "float", 0.0),
     FilterSpec("sort_col", "str", "mcap"),
     FilterSpec("ascending", "bool", False),
     FilterSpec("limit", "int", 100),
@@ -180,6 +204,56 @@ EV_EBITDA_BUCKETS: dict[str, tuple[float | None, float | None]] = {
     "10x 이하": (None, 10.0),
     "10x~20x": (10.0, 20.0),
     "20x 이상": (20.0, None),
+}
+
+RSI_MODES = ("Any", "구간 선택", "직접 입력")
+ATR_MODES = ("Any", "구간 선택", "직접 입력")
+GAP_MODES = ("Any", "구간 선택", "직접 입력")
+CHG_OPEN_MODES = ("Any", "구간 선택", "직접 입력")
+VOLATILITY_MODES = ("Any", "구간 선택", "직접 입력")
+FOREIGN_BUY_MODES = ("Any", "구간 선택", "직접 입력")
+
+RSI_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "30 이하": (None, 30.0),
+    "30~50": (30.0, 50.0),
+    "50~70": (50.0, 70.0),
+    "70 이상": (70.0, None),
+}
+ATR_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "0.5 이하": (None, 0.5),
+    "0.5~1.0": (0.5, 1.0),
+    "1.0~2.0": (1.0, 2.0),
+    "2.0 이상": (2.0, None),
+}
+GAP_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "-5% 이하": (None, -0.05),
+    "-2%~-0%": (-0.02, 0.0),
+    "0%~2%": (0.0, 0.02),
+    "2% 이상": (0.02, None),
+}
+CHG_OPEN_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "-3% 이하": (None, -0.03),
+    "-1%~1%": (-0.01, 0.01),
+    "1%~3%": (0.01, 0.03),
+    "3% 이상": (0.03, None),
+}
+VOLATILITY_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "20% 이하": (None, 0.2),
+    "20%~40%": (0.2, 0.4),
+    "40%~60%": (0.4, 0.6),
+    "60% 이상": (0.6, None),
+}
+FOREIGN_BUY_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "-1 이하": (None, -1.0),
+    "-1~0": (-1.0, 0.0),
+    "0~1": (0.0, 1.0),
+    "1 이상": (1.0, None),
 }
 
 
@@ -628,6 +702,12 @@ if "query_params_restored" not in st.session_state:
         "div_mode": "div_filter_mode",
         "momentum_mode": "momentum_filter_mode",
         "momentum_col": "momentum_metric",
+        "rsi_mode": "rsi_filter_mode",
+        "atr_mode": "atr_filter_mode",
+        "gap_mode": "gap_filter_mode",
+        "chg_open_mode": "chg_open_filter_mode",
+        "volatility_mode": "volatility_filter_mode",
+        "foreign_buy_mode": "foreign_buy_filter_mode",
     }
     for legacy_key, new_key in legacy_query_key_map.items():
         if new_key not in query_params and legacy_key in query_params:
@@ -638,6 +718,30 @@ if "query_params_restored" not in st.session_state:
             query_params["value_filter_mode"] = "직접 입력"
         if "value_min_custom" not in query_params and "value_min" in query_params:
             query_params["value_min_custom"] = query_params["value_min"]
+
+    technical_legacy_range_key_map = {
+        "rsi_min": "rsi_min_custom",
+        "rsi_max": "rsi_max_custom",
+        "rsi_range": "rsi_bucket",
+        "atr_min": "atr_min_custom",
+        "atr_max": "atr_max_custom",
+        "atr_range": "atr_bucket",
+        "gap_min": "gap_min_custom",
+        "gap_max": "gap_max_custom",
+        "gap_range": "gap_bucket",
+        "chg_open_min": "chg_open_min_custom",
+        "chg_open_max": "chg_open_max_custom",
+        "chg_open_range": "chg_open_bucket",
+        "volatility_min": "volatility_min_custom",
+        "volatility_max": "volatility_max_custom",
+        "volatility_range": "volatility_bucket",
+        "foreign_buy_min": "foreign_buy_min_custom",
+        "foreign_buy_max": "foreign_buy_max_custom",
+        "foreign_buy_range": "foreign_buy_bucket",
+    }
+    for legacy_key, new_key in technical_legacy_range_key_map.items():
+        if new_key not in query_params and legacy_key in query_params:
+            query_params[new_key] = query_params[legacy_key]
 
     for spec in FILTER_SPECS:
         try:
@@ -667,6 +771,24 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("ev_ebitda_filter_mode") not in EV_EBITDA_MODES:
         st.session_state.ev_ebitda_filter_mode = "Any"
         st.session_state.query_parse_errors.append("ev_ebitda_filter_mode")
+    if st.session_state.get("rsi_filter_mode") not in RSI_MODES:
+        st.session_state.rsi_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("rsi_filter_mode")
+    if st.session_state.get("atr_filter_mode") not in ATR_MODES:
+        st.session_state.atr_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("atr_filter_mode")
+    if st.session_state.get("gap_filter_mode") not in GAP_MODES:
+        st.session_state.gap_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("gap_filter_mode")
+    if st.session_state.get("chg_open_filter_mode") not in CHG_OPEN_MODES:
+        st.session_state.chg_open_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("chg_open_filter_mode")
+    if st.session_state.get("volatility_filter_mode") not in VOLATILITY_MODES:
+        st.session_state.volatility_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("volatility_filter_mode")
+    if st.session_state.get("foreign_buy_filter_mode") not in FOREIGN_BUY_MODES:
+        st.session_state.foreign_buy_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("foreign_buy_filter_mode")
 
     if st.session_state.get("mcap_bucket") not in MCAP_BUCKETS:
         st.session_state.mcap_bucket = "전체"
@@ -689,6 +811,24 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("ev_ebitda_bucket") not in EV_EBITDA_BUCKETS:
         st.session_state.ev_ebitda_bucket = "전체"
         st.session_state.query_parse_errors.append("ev_ebitda_bucket")
+    if st.session_state.get("rsi_bucket") not in RSI_BUCKETS:
+        st.session_state.rsi_bucket = "전체"
+        st.session_state.query_parse_errors.append("rsi_bucket")
+    if st.session_state.get("atr_bucket") not in ATR_BUCKETS:
+        st.session_state.atr_bucket = "전체"
+        st.session_state.query_parse_errors.append("atr_bucket")
+    if st.session_state.get("gap_bucket") not in GAP_BUCKETS:
+        st.session_state.gap_bucket = "전체"
+        st.session_state.query_parse_errors.append("gap_bucket")
+    if st.session_state.get("chg_open_bucket") not in CHG_OPEN_BUCKETS:
+        st.session_state.chg_open_bucket = "전체"
+        st.session_state.query_parse_errors.append("chg_open_bucket")
+    if st.session_state.get("volatility_bucket") not in VOLATILITY_BUCKETS:
+        st.session_state.volatility_bucket = "전체"
+        st.session_state.query_parse_errors.append("volatility_bucket")
+    if st.session_state.get("foreign_buy_bucket") not in FOREIGN_BUY_BUCKETS:
+        st.session_state.foreign_buy_bucket = "전체"
+        st.session_state.query_parse_errors.append("foreign_buy_bucket")
     if st.session_state.get("momentum_metric") not in MOMENTUM_METRICS:
         st.session_state.momentum_metric = "ret_3m"
         st.session_state.query_parse_errors.append("momentum_metric")
@@ -715,6 +855,18 @@ if st.session_state.get("momentum_filter_mode") not in MOMENTUM_MODES:
     st.session_state.momentum_filter_mode = "Any"
 if st.session_state.get("ev_ebitda_filter_mode") not in EV_EBITDA_MODES:
     st.session_state.ev_ebitda_filter_mode = "Any"
+if st.session_state.get("rsi_filter_mode") not in RSI_MODES:
+    st.session_state.rsi_filter_mode = "Any"
+if st.session_state.get("atr_filter_mode") not in ATR_MODES:
+    st.session_state.atr_filter_mode = "Any"
+if st.session_state.get("gap_filter_mode") not in GAP_MODES:
+    st.session_state.gap_filter_mode = "Any"
+if st.session_state.get("chg_open_filter_mode") not in CHG_OPEN_MODES:
+    st.session_state.chg_open_filter_mode = "Any"
+if st.session_state.get("volatility_filter_mode") not in VOLATILITY_MODES:
+    st.session_state.volatility_filter_mode = "Any"
+if st.session_state.get("foreign_buy_filter_mode") not in FOREIGN_BUY_MODES:
+    st.session_state.foreign_buy_filter_mode = "Any"
 
 if st.session_state.get("mcap_bucket") not in MCAP_BUCKETS:
     st.session_state.mcap_bucket = "전체"
@@ -730,6 +882,18 @@ if st.session_state.get("momentum_bucket") not in MOMENTUM_BUCKETS:
     st.session_state.momentum_bucket = "전체"
 if st.session_state.get("ev_ebitda_bucket") not in EV_EBITDA_BUCKETS:
     st.session_state.ev_ebitda_bucket = "전체"
+if st.session_state.get("rsi_bucket") not in RSI_BUCKETS:
+    st.session_state.rsi_bucket = "전체"
+if st.session_state.get("atr_bucket") not in ATR_BUCKETS:
+    st.session_state.atr_bucket = "전체"
+if st.session_state.get("gap_bucket") not in GAP_BUCKETS:
+    st.session_state.gap_bucket = "전체"
+if st.session_state.get("chg_open_bucket") not in CHG_OPEN_BUCKETS:
+    st.session_state.chg_open_bucket = "전체"
+if st.session_state.get("volatility_bucket") not in VOLATILITY_BUCKETS:
+    st.session_state.volatility_bucket = "전체"
+if st.session_state.get("foreign_buy_bucket") not in FOREIGN_BUY_BUCKETS:
+    st.session_state.foreign_buy_bucket = "전체"
 if st.session_state.get("momentum_metric") not in MOMENTUM_METRICS:
     st.session_state.momentum_metric = "ret_3m"
 
@@ -1360,6 +1524,42 @@ if ev_ebitda_filter_mode != "직접 입력":
 if ev_ebitda_filter_mode != "구간 선택":
     query_filter_state.pop("ev_ebitda_bucket", None)
 
+if st.session_state.get("rsi_filter_mode") != "직접 입력":
+    query_filter_state.pop("rsi_min_custom", None)
+    query_filter_state.pop("rsi_max_custom", None)
+if st.session_state.get("rsi_filter_mode") != "구간 선택":
+    query_filter_state.pop("rsi_bucket", None)
+
+if st.session_state.get("atr_filter_mode") != "직접 입력":
+    query_filter_state.pop("atr_min_custom", None)
+    query_filter_state.pop("atr_max_custom", None)
+if st.session_state.get("atr_filter_mode") != "구간 선택":
+    query_filter_state.pop("atr_bucket", None)
+
+if st.session_state.get("gap_filter_mode") != "직접 입력":
+    query_filter_state.pop("gap_min_custom", None)
+    query_filter_state.pop("gap_max_custom", None)
+if st.session_state.get("gap_filter_mode") != "구간 선택":
+    query_filter_state.pop("gap_bucket", None)
+
+if st.session_state.get("chg_open_filter_mode") != "직접 입력":
+    query_filter_state.pop("chg_open_min_custom", None)
+    query_filter_state.pop("chg_open_max_custom", None)
+if st.session_state.get("chg_open_filter_mode") != "구간 선택":
+    query_filter_state.pop("chg_open_bucket", None)
+
+if st.session_state.get("volatility_filter_mode") != "직접 입력":
+    query_filter_state.pop("volatility_min_custom", None)
+    query_filter_state.pop("volatility_max_custom", None)
+if st.session_state.get("volatility_filter_mode") != "구간 선택":
+    query_filter_state.pop("volatility_bucket", None)
+
+if st.session_state.get("foreign_buy_filter_mode") != "직접 입력":
+    query_filter_state.pop("foreign_buy_min_custom", None)
+    query_filter_state.pop("foreign_buy_max_custom", None)
+if st.session_state.get("foreign_buy_filter_mode") != "구간 선택":
+    query_filter_state.pop("foreign_buy_bucket", None)
+
 _set_query_params(query_filter_state)
 
 share_query_string = urlencode(query_filter_state, doseq=True)
@@ -1404,6 +1604,30 @@ if momentum_available and momentum_filter_mode != "Any":
 if fundamental_metric_availability["ev_ebitda"] and ev_ebitda_filter_mode != "Any":
     condition_summaries.append(
         f"EV/EBITDA {_format_range_summary(ev_ebitda_filter_mode, ev_ebitda_bucket, ev_ebitda_min_custom, ev_ebitda_max_custom)}"
+    )
+if st.session_state.get("rsi_filter_mode") != "Any":
+    condition_summaries.append(
+        f"RSI(14) {_format_range_summary(st.session_state.get('rsi_filter_mode', 'Any'), st.session_state.get('rsi_bucket', '전체'), st.session_state.get('rsi_min_custom', 0.0), st.session_state.get('rsi_max_custom', 0.0))}"
+    )
+if st.session_state.get("atr_filter_mode") != "Any":
+    condition_summaries.append(
+        f"ATR(14) {_format_range_summary(st.session_state.get('atr_filter_mode', 'Any'), st.session_state.get('atr_bucket', '전체'), st.session_state.get('atr_min_custom', 0.0), st.session_state.get('atr_max_custom', 0.0))}"
+    )
+if st.session_state.get("gap_filter_mode") != "Any":
+    condition_summaries.append(
+        f"Gap% {_format_range_summary(st.session_state.get('gap_filter_mode', 'Any'), st.session_state.get('gap_bucket', '전체'), st.session_state.get('gap_min_custom', 0.0), st.session_state.get('gap_max_custom', 0.0))}"
+    )
+if st.session_state.get("chg_open_filter_mode") != "Any":
+    condition_summaries.append(
+        f"시가대비 등락률 {_format_range_summary(st.session_state.get('chg_open_filter_mode', 'Any'), st.session_state.get('chg_open_bucket', '전체'), st.session_state.get('chg_open_min_custom', 0.0), st.session_state.get('chg_open_max_custom', 0.0))}"
+    )
+if st.session_state.get("volatility_filter_mode") != "Any":
+    condition_summaries.append(
+        f"변동성(20D) {_format_range_summary(st.session_state.get('volatility_filter_mode', 'Any'), st.session_state.get('volatility_bucket', '전체'), st.session_state.get('volatility_min_custom', 0.0), st.session_state.get('volatility_max_custom', 0.0))}"
+    )
+if st.session_state.get("foreign_buy_filter_mode") != "Any":
+    condition_summaries.append(
+        f"외국인 순매수비율 {_format_range_summary(st.session_state.get('foreign_buy_filter_mode', 'Any'), st.session_state.get('foreign_buy_bucket', '전체'), st.session_state.get('foreign_buy_min_custom', 0.0), st.session_state.get('foreign_buy_max_custom', 0.0))}"
     )
 if st.session_state.get("apply_eps_qoq"):
     condition_summaries.append(f"EPS Q/Q ≥ {st.session_state.get('eps_qoq_min', 0):.2f}")
