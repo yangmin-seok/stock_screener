@@ -43,13 +43,21 @@
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
-streamlit run src/stock_screener/web/app.py
+PYTHONPATH=src streamlit run src/stock_screener/web/app.py
 ```
 
 ### Streamlit 기본 asof 동작
 - 기본 `asof`는 **최신 거래일(가격 데이터 기준)** 을 우선 사용합니다.
 - 최신 거래일에 snapshot이 없으면 최신 snapshot 날짜로 fallback 하며, UI에서 snapshot 재계산이 필요하다는 안내를 표시합니다.
 - 최신 거래일 snapshot이 비어 있는 경우 앱 시작 시 `스냅샷만 재계산`을 자동으로 1회 시도합니다.
+
+### 에이전트 업데이트 (2026-02-25)
+- Fundamental 탭 UI를 Finviz 스타일에 맞춰 더 촘촘한 그리드(상단 핵심지표 4열 + 성장지표 3열 + 커버리지 2열)로 정리했습니다.
+- 필터 상태 키/URL 쿼리 키는 변경하지 않아 기존 공유 링크 및 세션 상태와 호환됩니다.
+- 장시간 배치 취소는 chunk 시작 전뿐 아니라 가격/시총/펀더멘털 루프의 안전 체크포인트에서도 반영되며, `job_log`에 `cancelled` 상태로 기록됩니다.
+- 수집 품질 관측(예: `eps_non_null`, `bps_non_null`)은 `--report-latest-batch`로 최근 실행분을 바로 확인할 수 있습니다.
+
+> 참고: 일부 실행 환경에서는 `streamlit run ...` 단독 실행 시 모듈 경로 이슈(`ModuleNotFoundError: stock_screener`)가 발생할 수 있으므로 `PYTHONPATH=src`를 함께 사용하세요.
 
 ## 배치만 실행
 ```bash
