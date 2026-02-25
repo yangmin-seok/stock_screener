@@ -10,9 +10,26 @@
 - Streamlit 프론트: 커스텀 필터 + CSV 다운로드
 - 현재 UI는 **Descriptive 탭 중심**으로 실사용 가능하도록 상세 구현
 
+
+## 펀더멘털 데이터 소스 우선순위
+- 기본 수집 순서: **DART (primary) -> pykrx (fallback)**
+- 병합 시 tie-break 규칙:
+  1. `is_correction` 우선 (정정 공시 우선)
+  2. `reported_date` 최신 우선
+  3. `source_priority` 높은 값 우선
+
 ## 구현 상태 (중요)
 - 현재 필터 UX는 **Descriptive 탭이 중심**이며, 이 문서도 해당 탭 사용법 위주로 안내합니다.
 - Fundamental/Technical 탭은 기본 제어가 존재하지만, 운영 가이드는 Descriptive 기준으로 유지합니다.
+
+
+## 현재 지원 지표/컬럼 (Valuation / Growth)
+- **Valuation**
+  - `pe_ratio`, `forward_pe`, `ps_ratio`, `pb_ratio`, `peg_ratio`
+  - `ps`, `peg`, `ev`, `ev_sales`, `ev_ebitda`
+- **Growth**
+  - `eps_cagr_3y`, `eps_cagr_5y`, `eps_yoy_q`, `eps_growth_ttm`, `eps_qoq`
+  - `sales_growth_qoq`, `sales_growth_ttm`, `sales_cagr_3y`, `sales_cagr_5y`
 
 ## 성장 스크리너 지표
 - `eps_cagr_5y`: 최근 5년 EPS CAGR (근사치)
@@ -121,6 +138,12 @@ python -m stock_screener.cli --db-path data/screener.db --update-reserve-only --
 - Descriptive 필터 행은 동일한 컬럼 그리드(기준선) 정렬을 유지합니다.
 - 새 필터를 추가할 때는 기존 행과 수직 기준선이 어긋나지 않도록 동일 폭 컬럼 또는 동일 그리드의 다중 행 구성 방식을 우선합니다.
 - `Any / 구간 선택 / 직접 입력` 모드 전환은 기존 상태/쿼리 파라미터 동기화 규칙을 그대로 따릅니다.
+
+
+## 운영 설정 및 보안
+- `.env`에 `DART_API_KEY`를 설정해야 DART 기반 펀더멘털 수집이 동작합니다.
+- 운영 환경에서는 키를 시크릿 매니저/환경변수로 주입하고, 저장소에 직접 커밋하지 마세요.
+- `.env`/API 키 평문 파일은 반드시 `.gitignore`로 관리하고, 로그 출력 시 키 마스킹을 유지하세요.
 
 ## 실행 시간 가이드
 - **전체 수집 + 스냅샷**: 최초 1회는 티커×기간 API 호출 때문에 수 분~수십 분이 걸릴 수 있습니다.
