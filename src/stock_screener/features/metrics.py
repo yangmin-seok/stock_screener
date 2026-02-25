@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
@@ -11,6 +13,17 @@ from stock_screener.features.fundamental_growth import (
 )
 
 CALC_VERSION = "v1.4"
+logger = logging.getLogger(__name__)
+
+
+def _safe_ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+    num = pd.to_numeric(numerator, errors="coerce")
+    den = pd.to_numeric(denominator, errors="coerce")
+    valid = num.notna() & den.notna() & (den > 0)
+    result = pd.Series(np.nan, index=num.index, dtype=float)
+    result.loc[valid] = num.loc[valid] / den.loc[valid]
+    return result
+
 
 
 def _result_to_row(result: GrowthResult) -> dict[str, object]:
@@ -96,7 +109,7 @@ def build_snapshot(
     pbr_num = pd.to_numeric(merged["pbr"], errors="coerce")
     dps_num = pd.to_numeric(merged["dps"], errors="coerce")
 
-    merged["roe_proxy"] = np.where((bps_num > 0), eps_num / bps_num, np.nan)
+    merged["roe_proxy"] = _safe_ratio(eps_num, bps_num)
     merged["eps_positive"] = (eps_num > 0).fillna(False).astype(int)
     merged["dist_sma20"] = merged["close"] / merged["sma20"] - 1
     merged["dist_sma50"] = merged["close"] / merged["sma50"] - 1
@@ -105,8 +118,8 @@ def build_snapshot(
     merged["pos_52w"] = np.where(denom > 0, (merged["close"] - merged["low_52w"]) / denom, np.nan)
     merged["near_52w_high_ratio"] = np.where(merged["high_52w"] > 0, merged["close"] / merged["high_52w"], np.nan)
     merged["current_value"] = merged["value"]
-    merged["relative_value"] = np.where(merged["avg_value_20d"] > 0, merged["current_value"] / merged["avg_value_20d"], np.nan)
-    merged["turnover_20d"] = merged["avg_value_20d"] / merged["mcap"]
+    merged["relative_value"] = _safe_ratio(merged["current_value"], merged["avg_value_20d"])
+    merged["turnover_20d"] = _safe_ratio(merged["avg_value_20d"], merged["mcap"])
 
     growth = merged[["ticker"]].copy()
 
@@ -144,31 +157,49 @@ def build_snapshot(
     merged["pe_ratio"] = per_num
     merged["forward_pe"] = np.nan
     rev_ttm = merged["ticker"].map(lambda t: _ttm_sum_from_quarterly(fund_hist, t, asof_date, "revenue"))
-    op_ttm = merged["ticker"].map(lambda t: _ttm_sum_from_quarterly(fund_hist, t, asof_date, "operating_income"))
-    net_ttm = merged["ticker"].map(lambda t: _ttm_sum_from_quarterly(fund_hist, t, asof_date, "net_income"))
-    merged["ps_ratio"] = np.where(rev_ttm > 0, merged["mcap"] / rev_ttm, np.nan)
+    merged["ps_ratio"] = _safe_ratio(merged["mcap"], rev_ttm)
     merged["pb_ratio"] = pbr_num
-    merged["peg_ratio"] = np.where(merged["eps_cagr_5y"] > 0, per_num / (merged["eps_cagr_5y"] * 100.0), np.nan)
-    merged["ev_sales"] = np.nan
-    merged["ev_ebitda"] = np.nan
+    merged["peg_ratio"] = _safe_ratio(per_num, merged["eps_cagr_5y"] * 100.0)
 
     latest_periodic = merged["ticker"].map(lambda t: _latest_periodic_row(fund_hist, t, asof_date))
     rev_latest = latest_periodic.map(lambda r: np.nan if r is None else pd.to_numeric(r.get("revenue"), errors="coerce"))
     op_latest = latest_periodic.map(lambda r: np.nan if r is None else pd.to_numeric(r.get("operating_income"), errors="coerce"))
     net_latest = latest_periodic.map(lambda r: np.nan if r is None else pd.to_numeric(r.get("net_income"), errors="coerce"))
+    debt_latest = latest_periodic.map(lambda r: np.nan if r is None else pd.to_numeric(r.get("debt"), errors="coerce"))
+    cash_latest = latest_periodic.map(lambda r: np.nan if r is None else pd.to_numeric(r.get("cash"), errors="coerce"))
+
+    ebitda_ttm = merged["ticker"].map(lambda t: _ttm_sum_from_quarterly(fund_hist, t, asof_date, "ebitda"))
+    if "revenue" not in fund_hist.columns:
+        logger.warning("ps/ev_sales missing input column 'revenue'; related metrics are set to NaN")
+    if "debt" not in fund_hist.columns:
+        logger.warning("ev/ev-based metrics missing input column 'debt'; EV-based metrics default to NaN")
+    if "cash" not in fund_hist.columns:
+        logger.warning("ev/ev-based metrics missing input column 'cash'; EV-based metrics default to NaN")
+    if "ebitda" not in fund_hist.columns:
+        logger.warning("ev_ebitda missing input column 'ebitda'; metric is set to NaN")
+
+    enterprise_value = pd.to_numeric(merged["mcap"], errors="coerce") + debt_latest - cash_latest
+    invalid_ev = enterprise_value.isna() | (enterprise_value <= 0)
+    enterprise_value = enterprise_value.mask(invalid_ev, np.nan)
+
+    merged["ps"] = merged["ps_ratio"]
+    merged["peg"] = merged["peg_ratio"]
+    merged["ev"] = enterprise_value
+    merged["ev_sales"] = _safe_ratio(enterprise_value, rev_ttm)
+    merged["ev_ebitda"] = _safe_ratio(enterprise_value, ebitda_ttm)
 
     merged["gross_margin"] = np.nan
-    merged["operating_margin"] = np.where(rev_latest > 0, op_latest / rev_latest, np.nan)
-    merged["net_margin"] = np.where(rev_latest > 0, net_latest / rev_latest, np.nan)
+    merged["operating_margin"] = _safe_ratio(op_latest, rev_latest)
+    merged["net_margin"] = _safe_ratio(net_latest, rev_latest)
     merged["roa"] = np.nan
-    merged["roe"] = np.where(bps_num > 0, eps_num / bps_num, np.nan)
+    merged["roe"] = _safe_ratio(eps_num, bps_num)
     merged["roic"] = np.nan
 
     merged["debt_equity"] = np.nan
     merged["lt_debt_equity"] = np.nan
     merged["current_ratio"] = np.nan
     merged["quick_ratio"] = np.nan
-    merged["payout_ratio"] = np.where(eps_num > 0, dps_num / eps_num, np.nan)
+    merged["payout_ratio"] = _safe_ratio(dps_num, eps_num)
 
     counts = price_window.groupby("ticker")["close"].size()
     merged["has_price_5y"] = merged["ticker"].map(lambda t: int(counts.get(t, 0) >= 252 * 5))
@@ -182,7 +213,7 @@ def build_snapshot(
         "per", "pbr", "div", "dps", "eps", "bps", "reserve_ratio", "fiscal_period", "period_type", "reported_date", "consolidation_type", "financial_source", "roe_proxy", "eps_positive", "sma20", "sma50", "sma200",
         "dist_sma20", "dist_sma50", "dist_sma200", "high_52w", "low_52w", "pos_52w", "near_52w_high_ratio",
         "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_5y", "eps_yoy_q", "eps_growth_ttm", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y",
-        "pe_ratio", "forward_pe", "ps_ratio", "pb_ratio", "peg_ratio", "ev_sales", "ev_ebitda",
+        "pe_ratio", "forward_pe", "ps_ratio", "pb_ratio", "peg_ratio", "ps", "peg", "ev", "ev_sales", "ev_ebitda",
         "gross_margin", "operating_margin", "net_margin", "roa", "roe", "roic",
         "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio",
         "eps_cagr_5y_window_years", "eps_cagr_5y_asof", "eps_cagr_5y_sample_count",
