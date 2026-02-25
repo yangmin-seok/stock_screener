@@ -109,11 +109,39 @@ class DailyBatchPipeline:
 
         return sorted(dates)
 
-    def _collect_financials(self, dt: date) -> pd.DataFrame:
-        provider_frames = [provider.fetch_financials(dt) for provider in self.financial_providers]
+    @staticmethod
+    def _frame_metric_count(frame: pd.DataFrame, metric: str) -> int:
+        if frame.empty or metric not in frame.columns:
+            return 0
+        return int(frame[metric].notna().sum())
+
+    def _collect_financials(self, dt: date, *, asof: str, chunk_idx: int) -> pd.DataFrame:
+        provider_frames: list[pd.DataFrame] = []
+        for provider in self.financial_providers:
+            frame = provider.fetch_financials(dt)
+            provider_frames.append(frame)
+            logger.info(
+                "Financial provider output: asof=%s, chunk_idx=%s, fdt=%s, provider=%s, rows=%s, eps_non_null=%s, bps_non_null=%s",
+                asof,
+                chunk_idx,
+                dt,
+                provider.__class__.__name__,
+                len(frame),
+                self._frame_metric_count(frame, "eps"),
+                self._frame_metric_count(frame, "bps"),
+            )
         merged = merge_financial_records(provider_frames)
+        logger.info(
+            "Financial merge output: asof=%s, chunk_idx=%s, fdt=%s, rows=%s, eps_non_null=%s, bps_non_null=%s",
+            asof,
+            chunk_idx,
+            dt,
+            len(merged),
+            self._frame_metric_count(merged, "eps"),
+            self._frame_metric_count(merged, "bps"),
+        )
         if merged.empty:
-            logger.warning("No financial provider rows for date=%s", dt)
+            logger.warning("No financial provider rows: asof=%s, chunk_idx=%s, fdt=%s", asof, chunk_idx, dt)
         return merged
 
     def _safe_collect(self, fn, *args, label: str, max_attempts: int = 4, **kwargs):
@@ -264,7 +292,26 @@ class DailyBatchPipeline:
                         fdt,
                         label=f"fundamental:{fdt}",
                     )
-                    financial_frame = self._safe_collect(self._collect_financials, fdt, label=f"financials:{fdt}")
+                    financial_frame = self._safe_collect(
+                        self._collect_financials,
+                        fdt,
+                        asof=asof_str,
+                        chunk_idx=chunk_idx,
+                        label=f"financials:{fdt}",
+                    )
+                    eps_null = len(financial_frame) - self._frame_metric_count(financial_frame, "eps")
+                    bps_null = len(financial_frame) - self._frame_metric_count(financial_frame, "bps")
+                    logger.info(
+                        "Financial frame before upsert: asof=%s, chunk_idx=%s, fdt=%s, rows=%s, eps_non_null=%s, bps_non_null=%s, eps_null=%s, bps_null=%s",
+                        asof_str,
+                        chunk_idx,
+                        fdt,
+                        len(financial_frame),
+                        self._frame_metric_count(financial_frame, "eps"),
+                        self._frame_metric_count(financial_frame, "bps"),
+                        eps_null,
+                        bps_null,
+                    )
                     upsert_rows = self.repo.upsert_fundamental(fund_frame)
                     upsert_rows += self.repo.upsert_financials(financial_frame, fdt.strftime("%Y-%m-%d"))
                     upsert_rows += self.repo.upsert_financials_periodic(financial_frame)
