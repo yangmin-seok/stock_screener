@@ -19,8 +19,9 @@
   3. `source_priority` 높은 값 우선
 
 ## 구현 상태 (중요)
-- 현재 필터 UX는 **Descriptive 탭이 중심**이며, 이 문서도 해당 탭 사용법 위주로 안내합니다.
-- Fundamental/Technical 탭은 기본 제어가 존재하지만, 운영 가이드는 Descriptive 기준으로 유지합니다.
+- Descriptive/Fundamental/Technical 탭 모두 Finviz 스타일의 직접 선택 필터 흐름을 유지합니다.
+- Technical 탭은 `변동성`과 `외국인` 필터를 분리해 UI 혼선을 줄였습니다.
+- 외국인 스크리너 기본 지표는 **`foreign_net_buy_value_20d`(외국인 순매수 20일 누적금액)** 입니다.
 
 
 ## 현재 지원 지표/컬럼 (Valuation / Growth)
@@ -52,6 +53,7 @@ PYTHONPATH=src streamlit run src/stock_screener/web/app.py
 - 최신 거래일 snapshot이 비어 있는 경우 앱 시작 시 `스냅샷만 재계산`을 자동으로 1회 시도합니다.
 
 ### 에이전트 업데이트 (2026-02-25)
+- Technical 탭 외국인 필터는 2차 필터(`foreign_buy2_*`)를 더 이상 사용하지 않으며, 구형 링크의 해당 키는 복원 시 정리됩니다.
 - Fundamental 탭 UI를 Finviz 스타일에 맞춰 더 촘촘한 그리드(상단 핵심지표 4열 + 성장지표 3열 + 커버리지 2열)로 정리했습니다.
 - 필터 상태 키/URL 쿼리 키는 변경하지 않아 기존 공유 링크 및 세션 상태와 호환됩니다.
 - 장시간 배치 취소는 chunk 시작 전뿐 아니라 가격/시총/펀더멘털 루프의 안전 체크포인트에서도 반영되며, `job_log`에 `cancelled` 상태로 기록됩니다.
@@ -110,6 +112,12 @@ python -m stock_screener.cli --db-path data/screener.db --update-reserve-only --
 ```
 - Streamlit UI에서도 `유보율만 업데이트` 버튼으로 동일 기능을 실행할 수 있습니다.
 
+
+## Technical 탭 운영 메모
+
+- 변동성 필터(`volatility_20d`)와 외국인 필터(`foreign_net_buy_value_20d`)는 분리된 섹션으로 노출됩니다.
+- 외국인 필터는 단일 경로로 운영하며, 금액(원) 기준 구간 버킷(`-100억 이하`, `0~100억`, `100억 이상`)을 사용합니다.
+- URL/세션 상태 복원 시 과거 `foreign_buy2_*` 키는 자동으로 제거(prune)됩니다.
 
 ## Descriptive 탭 상세 가이드
 
