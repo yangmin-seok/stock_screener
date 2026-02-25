@@ -56,6 +56,19 @@ streamlit run src/stock_screener/web/app.py
 python -m stock_screener.cli --db-path data/screener.db
 ```
 
+## 테스트 실행 (로컬/CI 공통)
+아래 명령을 표준으로 사용합니다.
+
+```bash
+PYTHONPATH=src python -m pytest -q
+```
+
+- 경로 이슈 재현/디버그가 필요하면 임시 옵션을 추가해 `sys.path[0]`를 출력할 수 있습니다.
+
+```bash
+PYTHONPATH=src python -m pytest -q --debug-sys-path
+```
+
 ## 유보율 업데이트
 - CLI에서 유보율만 갱신(네이버 크롤링):
 ```bash
