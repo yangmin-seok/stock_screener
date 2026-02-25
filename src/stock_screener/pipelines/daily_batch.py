@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
+import inspect
 import logging
 from pathlib import Path
 import os
@@ -145,10 +146,28 @@ class DailyBatchPipeline:
         return merged
 
     def _safe_collect(self, fn, *args, label: str, max_attempts: int = 4, **kwargs):
+        call_kwargs = kwargs
+        if kwargs:
+            try:
+                signature = inspect.signature(fn)
+                accepts_var_kwargs = any(
+                    parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    for parameter in signature.parameters.values()
+                )
+                if not accepts_var_kwargs:
+                    allowed = {
+                        name
+                        for name, parameter in signature.parameters.items()
+                        if parameter.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+                    }
+                    call_kwargs = {name: value for name, value in kwargs.items() if name in allowed}
+            except (TypeError, ValueError):
+                call_kwargs = kwargs
+
         last_error = None
         for attempt in range(1, max_attempts + 1):
             try:
-                return fn(*args, **kwargs)
+                return fn(*args, **call_kwargs)
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
                 sleep_s = min(10.0, 0.8 * (2 ** (attempt - 1)))
