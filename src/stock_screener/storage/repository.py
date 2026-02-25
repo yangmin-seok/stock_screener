@@ -106,6 +106,7 @@ class Repository:
         return len(rows)
 
     def upsert_financials(self, frame: pd.DataFrame, asof_date: str) -> int:
+        """Upsert collection-time financial rows into financials_daily audit history."""
         if frame.empty:
             return 0
         data = frame.copy()
@@ -143,6 +144,79 @@ class Repository:
                     net_income=COALESCE(excluded.net_income, financials_daily.net_income),
                     eps=COALESCE(excluded.eps, financials_daily.eps),
                     bps=COALESCE(excluded.bps, financials_daily.bps),
+                    source_ts=CURRENT_TIMESTAMP
+                """,
+                rows,
+            )
+        return len(rows)
+
+    def upsert_financials_periodic(self, frame: pd.DataFrame) -> int:
+        if frame.empty:
+            return 0
+        data = frame.copy()
+        for col, default in (("source_priority", 0), ("is_correction", 0)):
+            if col not in data.columns:
+                data[col] = default
+        data["source_priority"] = pd.to_numeric(data["source_priority"], errors="coerce").fillna(0).astype(int)
+        data["is_correction"] = pd.to_numeric(data["is_correction"], errors="coerce").fillna(0).astype(int)
+        data["reported_date"] = pd.to_datetime(data["reported_date"], errors="coerce")
+
+        # Tie-break priority: correction wins > latest reported date > higher source priority.
+        data = data.sort_values(
+            by=[
+                "ticker",
+                "fiscal_period",
+                "period_type",
+                "consolidation_type",
+                "is_correction",
+                "reported_date",
+                "source_priority",
+            ],
+            ascending=[True, True, True, True, False, False, False],
+        )
+        deduped = data.drop_duplicates(
+            subset=["ticker", "fiscal_period", "period_type", "consolidation_type"],
+            keep="first",
+        ).copy()
+        deduped["reported_date"] = deduped["reported_date"].dt.strftime("%Y-%m-%d")
+
+        rows = self._to_sql_records(
+            deduped,
+            [
+                "ticker",
+                "fiscal_period",
+                "period_type",
+                "consolidation_type",
+                "reported_date",
+                "source",
+                "revenue",
+                "operating_income",
+                "net_income",
+                "eps",
+                "bps",
+                "is_correction",
+                "source_priority",
+            ],
+        )
+        with db_session(self.db_path) as conn:
+            conn.executemany(
+                """
+                INSERT INTO financials_periodic(
+                    ticker, fiscal_period, period_type, consolidation_type,
+                    reported_date, source, revenue, operating_income, net_income,
+                    eps, bps, source_ts, is_correction, source_priority
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
+                ON CONFLICT(ticker, fiscal_period, period_type, consolidation_type) DO UPDATE SET
+                    reported_date=excluded.reported_date,
+                    source=excluded.source,
+                    revenue=COALESCE(excluded.revenue, financials_periodic.revenue),
+                    operating_income=COALESCE(excluded.operating_income, financials_periodic.operating_income),
+                    net_income=COALESCE(excluded.net_income, financials_periodic.net_income),
+                    eps=COALESCE(excluded.eps, financials_periodic.eps),
+                    bps=COALESCE(excluded.bps, financials_periodic.bps),
+                    is_correction=COALESCE(excluded.is_correction, financials_periodic.is_correction),
+                    source_priority=COALESCE(excluded.source_priority, financials_periodic.source_priority),
                     source_ts=CURRENT_TIMESTAMP
                 """,
                 rows,
