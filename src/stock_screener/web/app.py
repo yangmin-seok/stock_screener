@@ -93,9 +93,6 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("sales_cagr_5y_min", "float", 0.1),
     FilterSpec("apply_has_price_5y", "bool", False),
     FilterSpec("apply_has_price_10y", "bool", False),
-    FilterSpec("above_200ma", "bool", False),
-    FilterSpec("apply_near_high", "bool", False),
-    FilterSpec("near_high_min", "float", 0.9),
     FilterSpec("rsi_filter_mode", "str", "Any"),
     FilterSpec("rsi_bucket", "str", "전체"),
     FilterSpec("rsi_min_custom", "float", 0.0),
@@ -117,9 +114,35 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("volatility_min_custom", "float", 0.0),
     FilterSpec("volatility_max_custom", "float", 0.0),
     FilterSpec("foreign_buy_filter_mode", "str", "Any"),
+    FilterSpec("foreign_buy_metric", "str", "foreign_net_buy_ratio"),
     FilterSpec("foreign_buy_bucket", "str", "전체"),
     FilterSpec("foreign_buy_min_custom", "float", 0.0),
     FilterSpec("foreign_buy_max_custom", "float", 0.0),
+    FilterSpec("foreign_buy2_filter_mode", "str", "Any"),
+    FilterSpec("foreign_buy2_metric", "str", "none"),
+    FilterSpec("foreign_buy2_bucket", "str", "전체"),
+    FilterSpec("foreign_buy2_min_custom", "float", 0.0),
+    FilterSpec("foreign_buy2_max_custom", "float", 0.0),
+    FilterSpec("dist_sma20_filter_mode", "str", "Any"),
+    FilterSpec("dist_sma20_bucket", "str", "전체"),
+    FilterSpec("dist_sma20_min_custom", "float", 0.0),
+    FilterSpec("dist_sma20_max_custom", "float", 0.0),
+    FilterSpec("dist_sma50_filter_mode", "str", "Any"),
+    FilterSpec("dist_sma50_bucket", "str", "전체"),
+    FilterSpec("dist_sma50_min_custom", "float", 0.0),
+    FilterSpec("dist_sma50_max_custom", "float", 0.0),
+    FilterSpec("dist_sma200_filter_mode", "str", "Any"),
+    FilterSpec("dist_sma200_bucket", "str", "전체"),
+    FilterSpec("dist_sma200_min_custom", "float", 0.0),
+    FilterSpec("dist_sma200_max_custom", "float", 0.0),
+    FilterSpec("near_high_filter_mode", "str", "Any"),
+    FilterSpec("near_high_bucket", "str", "전체"),
+    FilterSpec("near_high_min_custom", "float", 0.0),
+    FilterSpec("near_high_max_custom", "float", 0.0),
+    FilterSpec("near_low_filter_mode", "str", "Any"),
+    FilterSpec("near_low_bucket", "str", "전체"),
+    FilterSpec("near_low_min_custom", "float", 0.0),
+    FilterSpec("near_low_max_custom", "float", 0.0),
     FilterSpec("sort_col", "str", "mcap"),
     FilterSpec("ascending", "bool", False),
     FilterSpec("limit", "int", 100),
@@ -254,6 +277,36 @@ FOREIGN_BUY_BUCKETS: dict[str, tuple[float | None, float | None]] = {
     "-1~0": (-1.0, 0.0),
     "0~1": (0.0, 1.0),
     "1 이상": (1.0, None),
+}
+DIST_SMA_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "-10% 이하": (None, -0.10),
+    "-5%~0%": (-0.05, 0.0),
+    "0%~5%": (0.0, 0.05),
+    "5% 이상": (0.05, None),
+}
+NEAR_HIGH_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "95% 이상": (0.95, None),
+    "90% 이상": (0.90, None),
+    "80% 이상": (0.80, None),
+    "60%~80%": (0.60, 0.80),
+}
+NEAR_LOW_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "20% 이하": (None, 0.20),
+    "40% 이하": (None, 0.40),
+    "20%~40%": (0.20, 0.40),
+    "60% 이상": (0.60, None),
+}
+FOREIGN_BUY_METRICS: dict[str, tuple[str, str]] = {
+    "foreign_net_buy_ratio": ("외국인 순매수 비율", "%"),
+    "foreign_net_buy_volume": ("외국인 순매수량(당일)", "주"),
+    "foreign_net_buy_volume_20d": ("외국인 순매수량(20D 평균)", "주"),
+}
+FOREIGN_BUY_SECONDARY_METRICS: dict[str, tuple[str, str]] = {
+    "none": ("사용 안함", ""),
+    **FOREIGN_BUY_METRICS,
 }
 
 
@@ -640,6 +693,91 @@ def _render_descriptive_caption(caption_text: str) -> None:
         st.caption(caption_text)
 
 
+def _render_technical_range_filter(
+    *,
+    title: str,
+    mode_key: str,
+    mode_options: tuple[str, ...],
+    bucket_key: str,
+    bucket_options: dict[str, tuple[float | None, float | None]],
+    min_key: str,
+    max_key: str,
+    step: float,
+    number_format: str,
+    min_value: float | None = None,
+    help_text: str | None = None,
+    row_disabled: bool = False,
+) -> tuple[str, str, float, float]:
+    st.markdown(f"##### {title}")
+    cols = st.columns(4)
+    with cols[0]:
+        mode = st.selectbox("모드", list(mode_options), key=mode_key, disabled=row_disabled)
+    with cols[1]:
+        bucket = st.selectbox(
+            "구간",
+            list(bucket_options.keys()),
+            key=bucket_key,
+            disabled=row_disabled or mode != "구간 선택",
+        )
+    with cols[2]:
+        input_kwargs: dict[str, Any] = {
+            "label": "최소",
+            "step": step,
+            "format": number_format,
+            "key": min_key,
+            "disabled": row_disabled or mode != "직접 입력",
+            "help": help_text,
+        }
+        if min_value is not None:
+            input_kwargs["min_value"] = min_value
+        min_custom = st.number_input(**input_kwargs)
+    with cols[3]:
+        input_kwargs = {
+            "label": "최대",
+            "step": step,
+            "format": number_format,
+            "key": max_key,
+            "disabled": row_disabled or mode != "직접 입력",
+            "help": help_text,
+        }
+        if min_value is not None:
+            input_kwargs["min_value"] = min_value
+        max_custom = st.number_input(**input_kwargs)
+
+    if row_disabled and help_text:
+        st.caption(help_text)
+    return mode, bucket, min_custom, max_custom
+
+
+def _apply_range_mode_filter(
+    frame,
+    *,
+    col: str,
+    mode: str,
+    bucket: str,
+    bucket_map: dict[str, tuple[float | None, float | None]],
+    min_custom: float,
+    max_custom: float,
+):
+    if mode == "Any":
+        return frame
+    scoped = frame[frame[col].notna()]
+    if mode == "구간 선택":
+        lower, upper = bucket_map.get(bucket, (None, None))
+        if lower is not None:
+            scoped = scoped[scoped[col] >= lower]
+        if upper is not None:
+            scoped = scoped[scoped[col] <= upper]
+        return scoped
+    if mode == "직접 입력":
+        if min_custom != 0:
+            scoped = scoped[scoped[col] >= min_custom]
+        if max_custom != 0:
+            scoped = scoped[scoped[col] <= max_custom]
+        return scoped
+    return frame
+
+
 def _render_momentum_filter(*, row_disabled: bool = False) -> tuple[str, str, str, float, float]:
     st.markdown("#### 강도")
     row1_cols = st.columns(4)
@@ -738,6 +876,7 @@ if "query_params_restored" not in st.session_state:
         "foreign_buy_min": "foreign_buy_min_custom",
         "foreign_buy_max": "foreign_buy_max_custom",
         "foreign_buy_range": "foreign_buy_bucket",
+        "near_high_min": "near_high_min_custom",
     }
     for legacy_key, new_key in technical_legacy_range_key_map.items():
         if new_key not in query_params and legacy_key in query_params:
@@ -789,6 +928,24 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("foreign_buy_filter_mode") not in FOREIGN_BUY_MODES:
         st.session_state.foreign_buy_filter_mode = "Any"
         st.session_state.query_parse_errors.append("foreign_buy_filter_mode")
+    if st.session_state.get("foreign_buy2_filter_mode") not in FOREIGN_BUY_MODES:
+        st.session_state.foreign_buy2_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("foreign_buy2_filter_mode")
+    if st.session_state.get("dist_sma20_filter_mode") not in RSI_MODES:
+        st.session_state.dist_sma20_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("dist_sma20_filter_mode")
+    if st.session_state.get("dist_sma50_filter_mode") not in RSI_MODES:
+        st.session_state.dist_sma50_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("dist_sma50_filter_mode")
+    if st.session_state.get("dist_sma200_filter_mode") not in RSI_MODES:
+        st.session_state.dist_sma200_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("dist_sma200_filter_mode")
+    if st.session_state.get("near_high_filter_mode") not in RSI_MODES:
+        st.session_state.near_high_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("near_high_filter_mode")
+    if st.session_state.get("near_low_filter_mode") not in RSI_MODES:
+        st.session_state.near_low_filter_mode = "Any"
+        st.session_state.query_parse_errors.append("near_low_filter_mode")
 
     if st.session_state.get("mcap_bucket") not in MCAP_BUCKETS:
         st.session_state.mcap_bucket = "전체"
@@ -829,9 +986,33 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("foreign_buy_bucket") not in FOREIGN_BUY_BUCKETS:
         st.session_state.foreign_buy_bucket = "전체"
         st.session_state.query_parse_errors.append("foreign_buy_bucket")
+    if st.session_state.get("foreign_buy2_bucket") not in FOREIGN_BUY_BUCKETS:
+        st.session_state.foreign_buy2_bucket = "전체"
+        st.session_state.query_parse_errors.append("foreign_buy2_bucket")
+    if st.session_state.get("dist_sma20_bucket") not in DIST_SMA_BUCKETS:
+        st.session_state.dist_sma20_bucket = "전체"
+        st.session_state.query_parse_errors.append("dist_sma20_bucket")
+    if st.session_state.get("dist_sma50_bucket") not in DIST_SMA_BUCKETS:
+        st.session_state.dist_sma50_bucket = "전체"
+        st.session_state.query_parse_errors.append("dist_sma50_bucket")
+    if st.session_state.get("dist_sma200_bucket") not in DIST_SMA_BUCKETS:
+        st.session_state.dist_sma200_bucket = "전체"
+        st.session_state.query_parse_errors.append("dist_sma200_bucket")
+    if st.session_state.get("near_high_bucket") not in NEAR_HIGH_BUCKETS:
+        st.session_state.near_high_bucket = "전체"
+        st.session_state.query_parse_errors.append("near_high_bucket")
+    if st.session_state.get("near_low_bucket") not in NEAR_LOW_BUCKETS:
+        st.session_state.near_low_bucket = "전체"
+        st.session_state.query_parse_errors.append("near_low_bucket")
     if st.session_state.get("momentum_metric") not in MOMENTUM_METRICS:
         st.session_state.momentum_metric = "ret_3m"
         st.session_state.query_parse_errors.append("momentum_metric")
+    if st.session_state.get("foreign_buy_metric") not in FOREIGN_BUY_METRICS:
+        st.session_state.foreign_buy_metric = "foreign_net_buy_ratio"
+        st.session_state.query_parse_errors.append("foreign_buy_metric")
+    if st.session_state.get("foreign_buy2_metric") not in FOREIGN_BUY_SECONDARY_METRICS:
+        st.session_state.foreign_buy2_metric = "none"
+        st.session_state.query_parse_errors.append("foreign_buy2_metric")
 
     st.session_state.query_params_restored = True
 
@@ -867,6 +1048,18 @@ if st.session_state.get("volatility_filter_mode") not in VOLATILITY_MODES:
     st.session_state.volatility_filter_mode = "Any"
 if st.session_state.get("foreign_buy_filter_mode") not in FOREIGN_BUY_MODES:
     st.session_state.foreign_buy_filter_mode = "Any"
+if st.session_state.get("foreign_buy2_filter_mode") not in FOREIGN_BUY_MODES:
+    st.session_state.foreign_buy2_filter_mode = "Any"
+if st.session_state.get("dist_sma20_filter_mode") not in RSI_MODES:
+    st.session_state.dist_sma20_filter_mode = "Any"
+if st.session_state.get("dist_sma50_filter_mode") not in RSI_MODES:
+    st.session_state.dist_sma50_filter_mode = "Any"
+if st.session_state.get("dist_sma200_filter_mode") not in RSI_MODES:
+    st.session_state.dist_sma200_filter_mode = "Any"
+if st.session_state.get("near_high_filter_mode") not in RSI_MODES:
+    st.session_state.near_high_filter_mode = "Any"
+if st.session_state.get("near_low_filter_mode") not in RSI_MODES:
+    st.session_state.near_low_filter_mode = "Any"
 
 if st.session_state.get("mcap_bucket") not in MCAP_BUCKETS:
     st.session_state.mcap_bucket = "전체"
@@ -894,8 +1087,24 @@ if st.session_state.get("volatility_bucket") not in VOLATILITY_BUCKETS:
     st.session_state.volatility_bucket = "전체"
 if st.session_state.get("foreign_buy_bucket") not in FOREIGN_BUY_BUCKETS:
     st.session_state.foreign_buy_bucket = "전체"
+if st.session_state.get("foreign_buy2_bucket") not in FOREIGN_BUY_BUCKETS:
+    st.session_state.foreign_buy2_bucket = "전체"
+if st.session_state.get("dist_sma20_bucket") not in DIST_SMA_BUCKETS:
+    st.session_state.dist_sma20_bucket = "전체"
+if st.session_state.get("dist_sma50_bucket") not in DIST_SMA_BUCKETS:
+    st.session_state.dist_sma50_bucket = "전체"
+if st.session_state.get("dist_sma200_bucket") not in DIST_SMA_BUCKETS:
+    st.session_state.dist_sma200_bucket = "전체"
+if st.session_state.get("near_high_bucket") not in NEAR_HIGH_BUCKETS:
+    st.session_state.near_high_bucket = "전체"
+if st.session_state.get("near_low_bucket") not in NEAR_LOW_BUCKETS:
+    st.session_state.near_low_bucket = "전체"
 if st.session_state.get("momentum_metric") not in MOMENTUM_METRICS:
     st.session_state.momentum_metric = "ret_3m"
+if st.session_state.get("foreign_buy_metric") not in FOREIGN_BUY_METRICS:
+    st.session_state.foreign_buy_metric = "foreign_net_buy_ratio"
+if st.session_state.get("foreign_buy2_metric") not in FOREIGN_BUY_SECONDARY_METRICS:
+    st.session_state.foreign_buy2_metric = "none"
 
 _poll_background_job()
 
@@ -1038,6 +1247,21 @@ fundamental_metric_availability = {
     "sales_cagr_5y": "sales_cagr_5y" in base.columns and base["sales_cagr_5y"].notna().any(),
     "ev_ebitda": "ev_ebitda" in base.columns and base["ev_ebitda"].notna().any(),
 }
+technical_metric_availability = {
+    "rsi_14": "rsi_14" in base.columns and base["rsi_14"].notna().any(),
+    "dist_sma20": "dist_sma20" in base.columns and base["dist_sma20"].notna().any(),
+    "dist_sma50": "dist_sma50" in base.columns and base["dist_sma50"].notna().any(),
+    "dist_sma200": "dist_sma200" in base.columns and base["dist_sma200"].notna().any(),
+    "near_52w_high_ratio": "near_52w_high_ratio" in base.columns and base["near_52w_high_ratio"].notna().any(),
+    "pos_52w": "pos_52w" in base.columns and base["pos_52w"].notna().any(),
+    "atr_14": "atr_14" in base.columns and base["atr_14"].notna().any(),
+    "gap_pct": "gap_pct" in base.columns and base["gap_pct"].notna().any(),
+    "chg_from_open_pct": "chg_from_open_pct" in base.columns and base["chg_from_open_pct"].notna().any(),
+    "volatility_20d": "volatility_20d" in base.columns and base["volatility_20d"].notna().any(),
+    "foreign_net_buy_ratio": "foreign_net_buy_ratio" in base.columns and base["foreign_net_buy_ratio"].notna().any(),
+    "foreign_net_buy_volume": "foreign_net_buy_volume" in base.columns and base["foreign_net_buy_volume"].notna().any(),
+    "foreign_net_buy_volume_20d": "foreign_net_buy_volume_20d" in base.columns and base["foreign_net_buy_volume_20d"].notna().any(),
+}
 
 def _active_filter_count_from_state() -> int:
     return sum(
@@ -1055,7 +1279,18 @@ def _active_filter_count_from_state() -> int:
             int(bool(st.session_state.get("apply_roe_min", False))),
             int(bool(st.session_state.get("apply_eps_positive", False))),
             int(fundamental_metric_availability["ev_ebitda"] and st.session_state.get("ev_ebitda_filter_mode", "Any") != "Any"),
-            int(bool(st.session_state.get("above_200ma", False))),
+            int(st.session_state.get("rsi_filter_mode", "Any") != "Any"),
+            int(st.session_state.get("dist_sma20_filter_mode", "Any") != "Any"),
+            int(st.session_state.get("dist_sma50_filter_mode", "Any") != "Any"),
+            int(st.session_state.get("dist_sma200_filter_mode", "Any") != "Any"),
+            int(st.session_state.get("near_high_filter_mode", "Any") != "Any"),
+            int(st.session_state.get("near_low_filter_mode", "Any") != "Any"),
+            int(st.session_state.get("atr_filter_mode", "Any") != "Any"),
+            int(st.session_state.get("gap_filter_mode", "Any") != "Any"),
+            int(st.session_state.get("chg_open_filter_mode", "Any") != "Any"),
+            int(st.session_state.get("volatility_filter_mode", "Any") != "Any"),
+            int(st.session_state.get("foreign_buy_filter_mode", "Any") != "Any"),
+            int(st.session_state.get("foreign_buy2_metric", "none") != "none" and st.session_state.get("foreign_buy2_filter_mode", "Any") != "Any"),
             int(bool(st.session_state.get("apply_eps_cagr_5y", False))),
             int(bool(st.session_state.get("apply_eps_yoy_q", False))),
             int(bool(st.session_state.get("apply_eps_qoq", False))),
@@ -1064,7 +1299,6 @@ def _active_filter_count_from_state() -> int:
             int(bool(st.session_state.get("apply_sales_cagr_5y", False))),
             int(bool(st.session_state.get("apply_has_price_5y", False))),
             int(bool(st.session_state.get("apply_has_price_10y", False))),
-            int(bool(st.session_state.get("apply_near_high", False))),
         ]
     )
 
@@ -1317,16 +1551,197 @@ with fundamental_tab:
         apply_has_price_10y = st.checkbox("가격 데이터 10Y 커버리지 종목만", key="apply_has_price_10y")
 
 with technical_tab:
-    above_200ma = st.checkbox("200일선 위 조건 적용", key="above_200ma")
+    if not technical_metric_availability["rsi_14"]:
+        st.session_state.rsi_filter_mode = "Any"
+    _render_technical_range_filter(
+        title="RSI(14)",
+        mode_key="rsi_filter_mode",
+        mode_options=RSI_MODES,
+        bucket_key="rsi_bucket",
+        bucket_options=RSI_BUCKETS,
+        min_key="rsi_min_custom",
+        max_key="rsi_max_custom",
+        step=0.1,
+        number_format="%.2f",
+        min_value=0.0,
+        help_text="rsi_14 데이터가 없으면 비활성화됩니다.",
+        row_disabled=not technical_metric_availability["rsi_14"],
+    )
 
-    apply_near_high = st.checkbox("현재가 / 52주 신고가 조건 적용", key="apply_near_high")
-    near_high_min = st.number_input(
-        "현재가 / 52주 신고가 최소",
-
+    _render_technical_range_filter(
+        title="20일 이동평균선 대비 위치(dist_sma20)",
+        mode_key="dist_sma20_filter_mode",
+        mode_options=RSI_MODES,
+        bucket_key="dist_sma20_bucket",
+        bucket_options=DIST_SMA_BUCKETS,
+        min_key="dist_sma20_min_custom",
+        max_key="dist_sma20_max_custom",
         step=0.01,
-        format="%.2f",
-        disabled=not apply_near_high,
-        key="near_high_min",
+        number_format="%.2f",
+        help_text="비율(예: 0.05=+5%)",
+        row_disabled=not technical_metric_availability["dist_sma20"],
+    )
+
+    _render_technical_range_filter(
+        title="50일 이동평균선 대비 위치(dist_sma50)",
+        mode_key="dist_sma50_filter_mode",
+        mode_options=RSI_MODES,
+        bucket_key="dist_sma50_bucket",
+        bucket_options=DIST_SMA_BUCKETS,
+        min_key="dist_sma50_min_custom",
+        max_key="dist_sma50_max_custom",
+        step=0.01,
+        number_format="%.2f",
+        help_text="비율(예: 0.05=+5%)",
+        row_disabled=not technical_metric_availability["dist_sma50"],
+    )
+
+    _render_technical_range_filter(
+        title="200일 이동평균선 대비 위치(dist_sma200)",
+        mode_key="dist_sma200_filter_mode",
+        mode_options=RSI_MODES,
+        bucket_key="dist_sma200_bucket",
+        bucket_options=DIST_SMA_BUCKETS,
+        min_key="dist_sma200_min_custom",
+        max_key="dist_sma200_max_custom",
+        step=0.01,
+        number_format="%.2f",
+        help_text="비율(예: 0.05=+5%)",
+        row_disabled=not technical_metric_availability["dist_sma200"],
+    )
+
+    _render_technical_range_filter(
+        title="52주 High 근접도(near_52w_high_ratio)",
+        mode_key="near_high_filter_mode",
+        mode_options=RSI_MODES,
+        bucket_key="near_high_bucket",
+        bucket_options=NEAR_HIGH_BUCKETS,
+        min_key="near_high_min_custom",
+        max_key="near_high_max_custom",
+        step=0.01,
+        number_format="%.2f",
+        min_value=0.0,
+        help_text="현재가/52주고가 비율",
+        row_disabled=not technical_metric_availability["near_52w_high_ratio"],
+    )
+
+    _render_technical_range_filter(
+        title="52주 Low 근접도(pos_52w)",
+        mode_key="near_low_filter_mode",
+        mode_options=RSI_MODES,
+        bucket_key="near_low_bucket",
+        bucket_options=NEAR_LOW_BUCKETS,
+        min_key="near_low_min_custom",
+        max_key="near_low_max_custom",
+        step=0.01,
+        number_format="%.2f",
+        min_value=0.0,
+        help_text="(현재가-52주저가)/(52주고가-52주저가)",
+        row_disabled=not technical_metric_availability["pos_52w"],
+    )
+
+    _render_technical_range_filter(
+        title="ATR(14)",
+        mode_key="atr_filter_mode",
+        mode_options=ATR_MODES,
+        bucket_key="atr_bucket",
+        bucket_options=ATR_BUCKETS,
+        min_key="atr_min_custom",
+        max_key="atr_max_custom",
+        step=0.1,
+        number_format="%.2f",
+        min_value=0.0,
+        help_text="atr_14 값",
+        row_disabled=not technical_metric_availability["atr_14"],
+    )
+
+    _render_technical_range_filter(
+        title="Gap%(gap_pct)",
+        mode_key="gap_filter_mode",
+        mode_options=GAP_MODES,
+        bucket_key="gap_bucket",
+        bucket_options=GAP_BUCKETS,
+        min_key="gap_min_custom",
+        max_key="gap_max_custom",
+        step=0.01,
+        number_format="%.2f",
+        help_text="비율(예: 0.02=+2%)",
+        row_disabled=not technical_metric_availability["gap_pct"],
+    )
+
+    _render_technical_range_filter(
+        title="시가대비 등락률(chg_from_open_pct)",
+        mode_key="chg_open_filter_mode",
+        mode_options=CHG_OPEN_MODES,
+        bucket_key="chg_open_bucket",
+        bucket_options=CHG_OPEN_BUCKETS,
+        min_key="chg_open_min_custom",
+        max_key="chg_open_max_custom",
+        step=0.01,
+        number_format="%.2f",
+        help_text="비율(예: 0.03=+3%)",
+        row_disabled=not technical_metric_availability["chg_from_open_pct"],
+    )
+
+    _render_technical_range_filter(
+        title="변동성(20D)",
+        mode_key="volatility_filter_mode",
+        mode_options=VOLATILITY_MODES,
+        bucket_key="volatility_bucket",
+        bucket_options=VOLATILITY_BUCKETS,
+        min_key="volatility_min_custom",
+        max_key="volatility_max_custom",
+        step=0.01,
+        number_format="%.2f",
+        min_value=0.0,
+        help_text="volatility_20d 비율",
+        row_disabled=not technical_metric_availability["volatility_20d"],
+    )
+
+    foreign_metric_cols = st.columns(4)
+    with foreign_metric_cols[0]:
+        st.selectbox(
+            "외국인 필터1 지표",
+            list(FOREIGN_BUY_METRICS.keys()),
+            key="foreign_buy_metric",
+            format_func=lambda key: FOREIGN_BUY_METRICS[key][0],
+        )
+    _render_technical_range_filter(
+        title="외국인 필터1",
+        mode_key="foreign_buy_filter_mode",
+        mode_options=FOREIGN_BUY_MODES,
+        bucket_key="foreign_buy_bucket",
+        bucket_options=FOREIGN_BUY_BUCKETS,
+        min_key="foreign_buy_min_custom",
+        max_key="foreign_buy_max_custom",
+        step=0.1,
+        number_format="%.2f",
+        help_text="필터1 선택 지표에 적용",
+        row_disabled=not technical_metric_availability.get(st.session_state.get("foreign_buy_metric", "foreign_net_buy_ratio"), False),
+    )
+
+    with foreign_metric_cols[1]:
+        st.selectbox(
+            "외국인 필터2 지표",
+            list(FOREIGN_BUY_SECONDARY_METRICS.keys()),
+            key="foreign_buy2_metric",
+            format_func=lambda key: FOREIGN_BUY_SECONDARY_METRICS[key][0],
+        )
+    foreign_buy2_disabled = st.session_state.get("foreign_buy2_metric") == "none" or not technical_metric_availability.get(st.session_state.get("foreign_buy2_metric", "none"), False)
+    if foreign_buy2_disabled:
+        st.session_state.foreign_buy2_filter_mode = "Any"
+    _render_technical_range_filter(
+        title="외국인 필터2",
+        mode_key="foreign_buy2_filter_mode",
+        mode_options=FOREIGN_BUY_MODES,
+        bucket_key="foreign_buy2_bucket",
+        bucket_options=FOREIGN_BUY_BUCKETS,
+        min_key="foreign_buy2_min_custom",
+        max_key="foreign_buy2_max_custom",
+        step=0.1,
+        number_format="%.2f",
+        help_text="필터2는 선택 시에만 적용됩니다.",
+        row_disabled=foreign_buy2_disabled,
     )
 
 
@@ -1442,8 +1857,128 @@ elif fundamental_metric_availability["ev_ebitda"] and ev_ebitda_filter_mode == "
         filtered = filtered[filtered["ev_ebitda"] >= ev_ebitda_min_custom]
     if ev_ebitda_max_custom != 0:
         filtered = filtered[filtered["ev_ebitda"] <= ev_ebitda_max_custom]
-if above_200ma:
-    filtered = filtered[filtered["dist_sma200"] >= 0]
+if technical_metric_availability["rsi_14"]:
+    filtered = _apply_range_mode_filter(
+        filtered,
+        col="rsi_14",
+        mode=st.session_state.get("rsi_filter_mode", "Any"),
+        bucket=st.session_state.get("rsi_bucket", "전체"),
+        bucket_map=RSI_BUCKETS,
+        min_custom=st.session_state.get("rsi_min_custom", 0.0),
+        max_custom=st.session_state.get("rsi_max_custom", 0.0),
+    )
+if technical_metric_availability["dist_sma20"]:
+    filtered = _apply_range_mode_filter(
+        filtered,
+        col="dist_sma20",
+        mode=st.session_state.get("dist_sma20_filter_mode", "Any"),
+        bucket=st.session_state.get("dist_sma20_bucket", "전체"),
+        bucket_map=DIST_SMA_BUCKETS,
+        min_custom=st.session_state.get("dist_sma20_min_custom", 0.0),
+        max_custom=st.session_state.get("dist_sma20_max_custom", 0.0),
+    )
+if technical_metric_availability["dist_sma50"]:
+    filtered = _apply_range_mode_filter(
+        filtered,
+        col="dist_sma50",
+        mode=st.session_state.get("dist_sma50_filter_mode", "Any"),
+        bucket=st.session_state.get("dist_sma50_bucket", "전체"),
+        bucket_map=DIST_SMA_BUCKETS,
+        min_custom=st.session_state.get("dist_sma50_min_custom", 0.0),
+        max_custom=st.session_state.get("dist_sma50_max_custom", 0.0),
+    )
+if technical_metric_availability["dist_sma200"]:
+    filtered = _apply_range_mode_filter(
+        filtered,
+        col="dist_sma200",
+        mode=st.session_state.get("dist_sma200_filter_mode", "Any"),
+        bucket=st.session_state.get("dist_sma200_bucket", "전체"),
+        bucket_map=DIST_SMA_BUCKETS,
+        min_custom=st.session_state.get("dist_sma200_min_custom", 0.0),
+        max_custom=st.session_state.get("dist_sma200_max_custom", 0.0),
+    )
+if technical_metric_availability["near_52w_high_ratio"]:
+    filtered = _apply_range_mode_filter(
+        filtered,
+        col="near_52w_high_ratio",
+        mode=st.session_state.get("near_high_filter_mode", "Any"),
+        bucket=st.session_state.get("near_high_bucket", "전체"),
+        bucket_map=NEAR_HIGH_BUCKETS,
+        min_custom=st.session_state.get("near_high_min_custom", 0.0),
+        max_custom=st.session_state.get("near_high_max_custom", 0.0),
+    )
+if technical_metric_availability["pos_52w"]:
+    filtered = _apply_range_mode_filter(
+        filtered,
+        col="pos_52w",
+        mode=st.session_state.get("near_low_filter_mode", "Any"),
+        bucket=st.session_state.get("near_low_bucket", "전체"),
+        bucket_map=NEAR_LOW_BUCKETS,
+        min_custom=st.session_state.get("near_low_min_custom", 0.0),
+        max_custom=st.session_state.get("near_low_max_custom", 0.0),
+    )
+if technical_metric_availability["atr_14"]:
+    filtered = _apply_range_mode_filter(
+        filtered,
+        col="atr_14",
+        mode=st.session_state.get("atr_filter_mode", "Any"),
+        bucket=st.session_state.get("atr_bucket", "전체"),
+        bucket_map=ATR_BUCKETS,
+        min_custom=st.session_state.get("atr_min_custom", 0.0),
+        max_custom=st.session_state.get("atr_max_custom", 0.0),
+    )
+if technical_metric_availability["gap_pct"]:
+    filtered = _apply_range_mode_filter(
+        filtered,
+        col="gap_pct",
+        mode=st.session_state.get("gap_filter_mode", "Any"),
+        bucket=st.session_state.get("gap_bucket", "전체"),
+        bucket_map=GAP_BUCKETS,
+        min_custom=st.session_state.get("gap_min_custom", 0.0),
+        max_custom=st.session_state.get("gap_max_custom", 0.0),
+    )
+if technical_metric_availability["chg_from_open_pct"]:
+    filtered = _apply_range_mode_filter(
+        filtered,
+        col="chg_from_open_pct",
+        mode=st.session_state.get("chg_open_filter_mode", "Any"),
+        bucket=st.session_state.get("chg_open_bucket", "전체"),
+        bucket_map=CHG_OPEN_BUCKETS,
+        min_custom=st.session_state.get("chg_open_min_custom", 0.0),
+        max_custom=st.session_state.get("chg_open_max_custom", 0.0),
+    )
+if technical_metric_availability["volatility_20d"]:
+    filtered = _apply_range_mode_filter(
+        filtered,
+        col="volatility_20d",
+        mode=st.session_state.get("volatility_filter_mode", "Any"),
+        bucket=st.session_state.get("volatility_bucket", "전체"),
+        bucket_map=VOLATILITY_BUCKETS,
+        min_custom=st.session_state.get("volatility_min_custom", 0.0),
+        max_custom=st.session_state.get("volatility_max_custom", 0.0),
+    )
+primary_foreign_metric = st.session_state.get("foreign_buy_metric", "foreign_net_buy_ratio")
+if technical_metric_availability.get(primary_foreign_metric, False):
+    filtered = _apply_range_mode_filter(
+        filtered,
+        col=primary_foreign_metric,
+        mode=st.session_state.get("foreign_buy_filter_mode", "Any"),
+        bucket=st.session_state.get("foreign_buy_bucket", "전체"),
+        bucket_map=FOREIGN_BUY_BUCKETS,
+        min_custom=st.session_state.get("foreign_buy_min_custom", 0.0),
+        max_custom=st.session_state.get("foreign_buy_max_custom", 0.0),
+    )
+secondary_foreign_metric = st.session_state.get("foreign_buy2_metric", "none")
+if secondary_foreign_metric != "none" and technical_metric_availability.get(secondary_foreign_metric, False):
+    filtered = _apply_range_mode_filter(
+        filtered,
+        col=secondary_foreign_metric,
+        mode=st.session_state.get("foreign_buy2_filter_mode", "Any"),
+        bucket=st.session_state.get("foreign_buy2_bucket", "전체"),
+        bucket_map=FOREIGN_BUY_BUCKETS,
+        min_custom=st.session_state.get("foreign_buy2_min_custom", 0.0),
+        max_custom=st.session_state.get("foreign_buy2_max_custom", 0.0),
+    )
 if apply_eps_cagr_5y:
     filtered = filtered[(filtered["eps_cagr_5y"].notna()) & (filtered["eps_cagr_5y"] >= eps_cagr_5y_min)]
 if apply_eps_yoy_q:
@@ -1460,14 +1995,13 @@ if apply_has_price_5y and "has_price_5y" in filtered.columns:
     filtered = filtered[filtered["has_price_5y"] == 1]
 if apply_has_price_10y and "has_price_10y" in filtered.columns:
     filtered = filtered[filtered["has_price_10y"] == 1]
-if apply_near_high:
-    filtered = filtered[(filtered["near_52w_high_ratio"].notna()) & (filtered["near_52w_high_ratio"] >= near_high_min)]
-
 sort_col = st.selectbox(
     "정렬 컬럼",
     [
-        "mcap", "pbr", "reserve_ratio", "roe_proxy", "ret_3m", "ret_6m", "ret_1y", "near_52w_high_ratio", "div",
+        "mcap", "pbr", "reserve_ratio", "roe_proxy", "ret_3m", "ret_6m", "ret_1y", "near_52w_high_ratio", "pos_52w", "div",
         "avg_value_20d", "current_value", "relative_value", "ev_ebitda", "eps_cagr_5y", "eps_yoy_q", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y",
+        "rsi_14", "dist_sma20", "dist_sma50", "dist_sma200", "atr_14", "gap_pct", "chg_from_open_pct", "volatility_20d",
+        "foreign_net_buy_ratio", "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_value",
     ],
     key="sort_col",
 )
@@ -1560,6 +2094,23 @@ if st.session_state.get("foreign_buy_filter_mode") != "직접 입력":
 if st.session_state.get("foreign_buy_filter_mode") != "구간 선택":
     query_filter_state.pop("foreign_buy_bucket", None)
 
+if st.session_state.get("foreign_buy2_filter_mode") != "직접 입력":
+    query_filter_state.pop("foreign_buy2_min_custom", None)
+    query_filter_state.pop("foreign_buy2_max_custom", None)
+if st.session_state.get("foreign_buy2_filter_mode") != "구간 선택":
+    query_filter_state.pop("foreign_buy2_bucket", None)
+if st.session_state.get("foreign_buy2_metric") == "none":
+    query_filter_state.pop("foreign_buy2_filter_mode", None)
+    query_filter_state.pop("foreign_buy2_metric", None)
+
+for prefix in ("dist_sma20", "dist_sma50", "dist_sma200", "near_high", "near_low"):
+    mode = st.session_state.get(f"{prefix}_filter_mode", "Any")
+    if mode != "직접 입력":
+        query_filter_state.pop(f"{prefix}_min_custom", None)
+        query_filter_state.pop(f"{prefix}_max_custom", None)
+    if mode != "구간 선택":
+        query_filter_state.pop(f"{prefix}_bucket", None)
+
 _set_query_params(query_filter_state)
 
 share_query_string = urlencode(query_filter_state, doseq=True)
@@ -1609,6 +2160,26 @@ if st.session_state.get("rsi_filter_mode") != "Any":
     condition_summaries.append(
         f"RSI(14) {_format_range_summary(st.session_state.get('rsi_filter_mode', 'Any'), st.session_state.get('rsi_bucket', '전체'), st.session_state.get('rsi_min_custom', 0.0), st.session_state.get('rsi_max_custom', 0.0))}"
     )
+if st.session_state.get("dist_sma20_filter_mode") != "Any":
+    condition_summaries.append(
+        f"20일선 대비 {_format_range_summary(st.session_state.get('dist_sma20_filter_mode', 'Any'), st.session_state.get('dist_sma20_bucket', '전체'), st.session_state.get('dist_sma20_min_custom', 0.0), st.session_state.get('dist_sma20_max_custom', 0.0))}"
+    )
+if st.session_state.get("dist_sma50_filter_mode") != "Any":
+    condition_summaries.append(
+        f"50일선 대비 {_format_range_summary(st.session_state.get('dist_sma50_filter_mode', 'Any'), st.session_state.get('dist_sma50_bucket', '전체'), st.session_state.get('dist_sma50_min_custom', 0.0), st.session_state.get('dist_sma50_max_custom', 0.0))}"
+    )
+if st.session_state.get("dist_sma200_filter_mode") != "Any":
+    condition_summaries.append(
+        f"200일선 대비 {_format_range_summary(st.session_state.get('dist_sma200_filter_mode', 'Any'), st.session_state.get('dist_sma200_bucket', '전체'), st.session_state.get('dist_sma200_min_custom', 0.0), st.session_state.get('dist_sma200_max_custom', 0.0))}"
+    )
+if st.session_state.get("near_high_filter_mode") != "Any":
+    condition_summaries.append(
+        f"52주 High 근접 {_format_range_summary(st.session_state.get('near_high_filter_mode', 'Any'), st.session_state.get('near_high_bucket', '전체'), st.session_state.get('near_high_min_custom', 0.0), st.session_state.get('near_high_max_custom', 0.0))}"
+    )
+if st.session_state.get("near_low_filter_mode") != "Any":
+    condition_summaries.append(
+        f"52주 Low 근접 {_format_range_summary(st.session_state.get('near_low_filter_mode', 'Any'), st.session_state.get('near_low_bucket', '전체'), st.session_state.get('near_low_min_custom', 0.0), st.session_state.get('near_low_max_custom', 0.0))}"
+    )
 if st.session_state.get("atr_filter_mode") != "Any":
     condition_summaries.append(
         f"ATR(14) {_format_range_summary(st.session_state.get('atr_filter_mode', 'Any'), st.session_state.get('atr_bucket', '전체'), st.session_state.get('atr_min_custom', 0.0), st.session_state.get('atr_max_custom', 0.0))}"
@@ -1626,8 +2197,14 @@ if st.session_state.get("volatility_filter_mode") != "Any":
         f"변동성(20D) {_format_range_summary(st.session_state.get('volatility_filter_mode', 'Any'), st.session_state.get('volatility_bucket', '전체'), st.session_state.get('volatility_min_custom', 0.0), st.session_state.get('volatility_max_custom', 0.0))}"
     )
 if st.session_state.get("foreign_buy_filter_mode") != "Any":
+    primary_foreign_label = FOREIGN_BUY_METRICS.get(st.session_state.get("foreign_buy_metric", "foreign_net_buy_ratio"), ("외국인", ""))[0]
     condition_summaries.append(
-        f"외국인 순매수비율 {_format_range_summary(st.session_state.get('foreign_buy_filter_mode', 'Any'), st.session_state.get('foreign_buy_bucket', '전체'), st.session_state.get('foreign_buy_min_custom', 0.0), st.session_state.get('foreign_buy_max_custom', 0.0))}"
+        f"{primary_foreign_label} {_format_range_summary(st.session_state.get('foreign_buy_filter_mode', 'Any'), st.session_state.get('foreign_buy_bucket', '전체'), st.session_state.get('foreign_buy_min_custom', 0.0), st.session_state.get('foreign_buy_max_custom', 0.0))}"
+    )
+if st.session_state.get("foreign_buy2_metric") != "none" and st.session_state.get("foreign_buy2_filter_mode") != "Any":
+    secondary_foreign_label = FOREIGN_BUY_SECONDARY_METRICS.get(st.session_state.get("foreign_buy2_metric", "none"), ("외국인2", ""))[0]
+    condition_summaries.append(
+        f"{secondary_foreign_label} {_format_range_summary(st.session_state.get('foreign_buy2_filter_mode', 'Any'), st.session_state.get('foreign_buy2_bucket', '전체'), st.session_state.get('foreign_buy2_min_custom', 0.0), st.session_state.get('foreign_buy2_max_custom', 0.0))}"
     )
 if st.session_state.get("apply_eps_qoq"):
     condition_summaries.append(f"EPS Q/Q ≥ {st.session_state.get('eps_qoq_min', 0):.2f}")
@@ -1647,8 +2224,10 @@ if condition_summaries:
 
 show_cols = [
     "ticker", "name", "market", "close", "mcap", "avg_value_20d", "current_value", "relative_value", "pbr", "reserve_ratio", "per", "div", "dps",
-    "eps", "bps", "fiscal_period", "period_type", "reported_date", "consolidation_type", "financial_source", "roe_proxy", "eps_positive", "ret_3m", "ret_6m", "ret_1y", "dist_sma200", "pos_52w",
-    "near_52w_high_ratio", "eps_cagr_5y", "eps_yoy_q", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y", "pe_ratio", "forward_pe", "ps_ratio", "pb_ratio", "peg_ratio", "ev_sales", "ev_ebitda", "gross_margin", "operating_margin", "net_margin", "roa", "roe", "roic", "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio", "has_price_5y", "has_price_10y",
+    "eps", "bps", "fiscal_period", "period_type", "reported_date", "consolidation_type", "financial_source", "roe_proxy", "eps_positive", "ret_3m", "ret_6m", "ret_1y",
+    "rsi_14", "dist_sma20", "dist_sma50", "dist_sma200", "pos_52w", "near_52w_high_ratio", "atr_14", "gap_pct", "chg_from_open_pct", "volatility_20d",
+    "foreign_net_buy_ratio", "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_value",
+    "eps_cagr_5y", "eps_yoy_q", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y", "pe_ratio", "forward_pe", "ps_ratio", "pb_ratio", "peg_ratio", "ev_sales", "ev_ebitda", "gross_margin", "operating_margin", "net_margin", "roa", "roe", "roic", "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio", "has_price_5y", "has_price_10y",
 ]
 st.dataframe(
     filtered[show_cols],
@@ -1662,6 +2241,17 @@ st.dataframe(
             format="%.2fx",
             help="상대거래량 = current_value / avg_value_20d",
         ),
+        "rsi_14": st.column_config.NumberColumn("RSI(14)", format="%.2f"),
+        "dist_sma20": st.column_config.NumberColumn("20MA 대비", format="%.2f"),
+        "dist_sma50": st.column_config.NumberColumn("50MA 대비", format="%.2f"),
+        "dist_sma200": st.column_config.NumberColumn("200MA 대비", format="%.2f"),
+        "atr_14": st.column_config.NumberColumn("ATR(14)", format="%.2f"),
+        "gap_pct": st.column_config.NumberColumn("Gap%", format="%.2f"),
+        "chg_from_open_pct": st.column_config.NumberColumn("시가대비%", format="%.2f"),
+        "volatility_20d": st.column_config.NumberColumn("변동성(20D)", format="%.2f"),
+        "foreign_net_buy_ratio": st.column_config.NumberColumn("외국인 순매수비율", format="%.2f"),
+        "foreign_net_buy_volume": st.column_config.NumberColumn("외국인 순매수량", format="%,d"),
+        "foreign_net_buy_volume_20d": st.column_config.NumberColumn("외국인 순매수량(20D)", format="%,d"),
     },
 )
 
