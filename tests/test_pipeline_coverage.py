@@ -140,3 +140,34 @@ def test_daily_batch_chunk_logs_financial_non_null_counts(monkeypatch, tmp_path)
     assert "eps_non_null=1" in message
     assert "bps_non_null=1" in message
     assert "revenue_non_null=1" in message
+
+
+def test_daily_batch_clamps_future_latest_fundamental_date(monkeypatch, tmp_path):
+    monkeypatch.setenv("DART_API_KEY", "dummy-key")
+    pipeline = DailyBatchPipeline(tmp_path / "x.db")
+    pipeline.collector = _FakeCollector()
+
+    # Simulate corrupted/future checkpoint via existing fundamental_daily max(date).
+    pipeline.repo.upsert_fundamental(
+        pd.DataFrame(
+            [{"date": "2099-01-01", "ticker": "005930", "per": 1.0, "pbr": 1.0, "div": 0.0, "dps": 0.0}]
+        )
+    )
+    monkeypatch.setattr(pipeline, "_collect_financials", lambda dt: pd.DataFrame())
+
+    result = pipeline.run(
+        asof_date="2025-01-15",
+        lookback_days=5,
+        initial_backfill=False,
+        chunk_years=1,
+        chunks=1,
+        rebuild_snapshot=False,
+    )
+
+    assert result.fundamental > 0
+    with sqlite3.connect(tmp_path / "x.db") as conn:
+        status = conn.execute(
+            "SELECT status FROM job_log WHERE run_id = ? AND stage = ?",
+            ("daily_batch:2025-01-15", "fundamental_chunk_1"),
+        ).fetchone()[0]
+    assert status == "success"

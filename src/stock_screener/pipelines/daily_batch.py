@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
+import inspect
 import logging
 from pathlib import Path
 import os
@@ -145,10 +146,28 @@ class DailyBatchPipeline:
         return merged
 
     def _safe_collect(self, fn, *args, label: str, max_attempts: int = 4, **kwargs):
+        call_kwargs = kwargs
+        if kwargs:
+            try:
+                signature = inspect.signature(fn)
+                accepts_var_kwargs = any(
+                    parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    for parameter in signature.parameters.values()
+                )
+                if not accepts_var_kwargs:
+                    allowed = {
+                        name
+                        for name, parameter in signature.parameters.items()
+                        if parameter.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+                    }
+                    call_kwargs = {name: value for name, value in kwargs.items() if name in allowed}
+            except (TypeError, ValueError):
+                call_kwargs = kwargs
+
         last_error = None
         for attempt in range(1, max_attempts + 1):
             try:
-                return fn(*args, **kwargs)
+                return fn(*args, **call_kwargs)
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
                 sleep_s = min(10.0, 0.8 * (2 ** (attempt - 1)))
@@ -243,7 +262,23 @@ class DailyBatchPipeline:
         if initial_backfill:
             base_from_dt = dt - timedelta(days=max(lookback_days, 3650) + 365)
         elif latest_fundamental:
-            base_from_dt = pd.to_datetime(latest_fundamental).date() - timedelta(days=31)
+            parsed_latest = pd.to_datetime(latest_fundamental, errors="coerce")
+            if pd.isna(parsed_latest):
+                logger.warning(
+                    "Invalid latest fundamental checkpoint: %s. Falling back to default fundamental window.",
+                    latest_fundamental,
+                )
+                base_from_dt = dt - timedelta(days=400)
+            else:
+                latest_fundamental_dt = parsed_latest.date()
+                if latest_fundamental_dt > dt:
+                    logger.warning(
+                        "Latest fundamental date is in the future (latest=%s, asof=%s). Clamping to asof for chunk window.",
+                        latest_fundamental_dt,
+                        dt,
+                    )
+                    latest_fundamental_dt = dt
+                base_from_dt = latest_fundamental_dt - timedelta(days=31)
         else:
             base_from_dt = dt - timedelta(days=400)
 
@@ -262,6 +297,14 @@ class DailyBatchPipeline:
             chunk_from_dt = max(base_from_dt, chunk_start)
             chunk_to_dt = min(dt, chunk_end)
             if chunk_from_dt > chunk_to_dt:
+                logger.warning(
+                    "Skipping fundamental chunk due to empty range: chunk=%s/%s, base_from=%s, chunk_from=%s, chunk_to=%s",
+                    chunk_idx,
+                    chunks,
+                    base_from_dt,
+                    chunk_from_dt,
+                    chunk_to_dt,
+                )
                 continue
 
             stage = f"fundamental_chunk_{chunk_idx}"

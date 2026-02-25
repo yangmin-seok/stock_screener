@@ -961,6 +961,8 @@ with descriptive_tab:
         unit_help="단위: %",
     )
 
+    if not avg_value_available:
+        st.session_state.value_filter_mode = "Any"
     value_filter_mode, value_bucket, value_min_custom, value_max_custom = _render_descriptive_range_filter(
         title="평균 거래대금",
         mode_key="value_filter_mode",
@@ -975,13 +977,13 @@ with descriptive_tab:
         row_disabled=not avg_value_available,
     )
     if not avg_value_available:
-        st.session_state.value_filter_mode = "Any"
-        value_filter_mode = "Any"
         st.info("평균 거래대금 데이터가 없어 해당 필터를 비활성화했습니다.")
     _render_descriptive_caption(
         _format_volume_caption("평균 거래대금", value_filter_mode, value_bucket, value_min_custom, value_max_custom, "원")
     )
 
+    if not relative_value_available:
+        st.session_state.relvol_filter_mode = "Any"
     relvol_filter_mode, relvol_bucket, relvol_min_custom, relvol_max_custom = _render_descriptive_range_filter(
         title="상대거래량",
         mode_key="relvol_filter_mode",
@@ -996,13 +998,13 @@ with descriptive_tab:
         row_disabled=not relative_value_available,
     )
     if not relative_value_available:
-        st.session_state.relvol_filter_mode = "Any"
-        relvol_filter_mode = "Any"
         st.info("relative_value 데이터가 없어 해당 필터를 비활성화했습니다.")
     _render_descriptive_caption(
         _format_volume_caption("상대거래량", relvol_filter_mode, relvol_bucket, relvol_min_custom, relvol_max_custom, "x")
     )
 
+    if not momentum_available:
+        st.session_state.momentum_filter_mode = "Any"
     momentum_metric, momentum_filter_mode, momentum_bucket, momentum_min_custom, momentum_max_custom = _render_momentum_filter(
         row_disabled=not momentum_available
     )
@@ -1010,7 +1012,6 @@ with descriptive_tab:
         st.session_state.momentum_metric = available_momentum_metrics[0]
         momentum_metric = st.session_state.momentum_metric
     if not momentum_available:
-        st.session_state.momentum_filter_mode = "Any"
         st.info("모멘텀 데이터가 없어 해당 필터를 비활성화했습니다.")
 
 with fundamental_tab:
@@ -1020,6 +1021,8 @@ with fundamental_tab:
     apply_roe_min = st.checkbox("최소 ROE proxy 적용", key="apply_roe_min")
     roe_min = st.number_input("최소 ROE proxy", step=0.01, disabled=not apply_roe_min, key="roe_min")
 
+    if not fundamental_metric_availability["ev_ebitda"]:
+        st.session_state.ev_ebitda_filter_mode = "Any"
     ev_ebitda_filter_mode, ev_ebitda_bucket, ev_ebitda_min_custom, ev_ebitda_max_custom = _render_descriptive_range_filter(
         title="EV/EBITDA",
         mode_key="ev_ebitda_filter_mode",
@@ -1034,8 +1037,6 @@ with fundamental_tab:
         row_disabled=not fundamental_metric_availability["ev_ebitda"],
     )
     if not fundamental_metric_availability["ev_ebitda"]:
-        st.session_state.ev_ebitda_filter_mode = "Any"
-        ev_ebitda_filter_mode = "Any"
         st.info("EV/EBITDA 데이터 결측 비중이 높아 해당 필터를 Any로 전환했습니다.")
 
     apply_eps_positive = st.checkbox("EPS 흑자 기업만(적자 제외)", key="apply_eps_positive")
