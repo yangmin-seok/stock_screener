@@ -102,6 +102,9 @@ def build_snapshot(
     latest = latest[latest["asof_date"] == asof_date]
 
     merged = latest.merge(daily, how="left", on="ticker")
+    for col in ("foreign_net_buy_volume", "foreign_net_buy_value"):
+        if col not in merged.columns:
+            merged[col] = np.nan
     merged["close"] = merged["close"].astype(float)
     eps_num = pd.to_numeric(merged["eps"], errors="coerce")
     bps_num = pd.to_numeric(merged["bps"], errors="coerce")
@@ -225,7 +228,7 @@ def build_snapshot(
         "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_3y", "eps_cagr_5y", "eps_yoy_q", "eps_growth_ttm", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_3y", "sales_cagr_5y",
         "pe_ratio", "forward_pe", "ps_ratio", "pb_ratio", "peg_ratio", "ps", "peg", "ev", "ev_sales", "ev_ebitda",
         "gross_margin", "operating_margin", "net_margin", "roa", "roe", "roic",
-        "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio",
+        "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio", "foreign_net_buy_volume", "foreign_net_buy_value",
         "eps_cagr_3y_window_years", "eps_cagr_3y_asof", "eps_cagr_3y_sample_count",
         "eps_cagr_5y_window_years", "eps_cagr_5y_asof", "eps_cagr_5y_sample_count",
         "eps_yoy_q_window_years", "eps_yoy_q_asof", "eps_yoy_q_sample_count",

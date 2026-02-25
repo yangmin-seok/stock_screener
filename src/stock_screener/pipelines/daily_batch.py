@@ -311,6 +311,15 @@ class DailyBatchPipeline:
             if idx % 30 == 0 or idx == len(trading_dates):
                 logger.info("Cap progress: %s/%s dates, rows=%s", idx, len(trading_dates), cap_rows)
 
+
+        investor_flow_rows = 0
+        for idx, trading_dt in enumerate(trading_dates, start=1):
+            _raise_if_cancelled(phase=f"investor_flow_collection:{idx}/{len(trading_dates)}")
+            flow_frame = self._safe_collect(self.collector.foreign_investor_flow, trading_dt, label=f"investor_flow:{trading_dt}")
+            investor_flow_rows += self.repo.upsert_investor_flow(flow_frame)
+            if idx % 30 == 0 or idx == len(trading_dates):
+                logger.info("Investor flow progress: %s/%s dates, rows=%s", idx, len(trading_dates), investor_flow_rows)
+
         fund_rows = 0
         latest_fundamental = self.repo.get_latest_fundamental_date()
         if initial_backfill:
@@ -505,11 +514,12 @@ class DailyBatchPipeline:
             snapshot_rebuilt = True
 
         logger.info(
-            "Daily batch completed: asof=%s, tickers=%s, prices=%s, cap=%s, fundamental=%s, chunks_done=%s/%s, snapshot_rebuilt=%s, snapshot_rows=%s",
+            "Daily batch completed: asof=%s, tickers=%s, prices=%s, cap=%s, investor_flow=%s, fundamental=%s, chunks_done=%s/%s, snapshot_rebuilt=%s, snapshot_rows=%s",
             asof_str,
             ticker_count,
             price_rows,
             cap_rows,
+            investor_flow_rows,
             fund_rows,
             chunks_done,
             chunks,

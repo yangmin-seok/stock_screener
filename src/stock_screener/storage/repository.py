@@ -116,6 +116,30 @@ class Repository:
             )
         return len(rows)
 
+
+    def upsert_investor_flow(self, frame: pd.DataFrame) -> int:
+        if frame.empty:
+            return 0
+        data = frame.copy()
+        if "foreign_net_buy_volume" not in data.columns:
+            data["foreign_net_buy_volume"] = pd.NA
+        if "foreign_net_buy_value" not in data.columns:
+            data["foreign_net_buy_value"] = pd.NA
+        rows = self._to_sql_records(data, ["date", "ticker", "foreign_net_buy_volume", "foreign_net_buy_value"])
+        with db_session(self.db_path) as conn:
+            conn.executemany(
+                """
+                INSERT INTO investor_flow_daily(date, ticker, foreign_net_buy_volume, foreign_net_buy_value, source_ts)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(date, ticker) DO UPDATE SET
+                    foreign_net_buy_volume=excluded.foreign_net_buy_volume,
+                    foreign_net_buy_value=excluded.foreign_net_buy_value,
+                    source_ts=CURRENT_TIMESTAMP
+                """,
+                rows,
+            )
+        return len(rows)
+
     def upsert_fundamental(self, frame: pd.DataFrame) -> int:
         if frame.empty:
             return 0
@@ -413,7 +437,7 @@ class Repository:
                 "vol_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_3y", "eps_cagr_5y", "eps_yoy_q", "eps_growth_ttm", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_3y", "sales_cagr_5y",
                 "pe_ratio", "forward_pe", "ps_ratio", "pb_ratio", "peg_ratio", "ps", "peg", "ev", "ev_sales", "ev_ebitda",
                 "gross_margin", "operating_margin", "net_margin", "roa", "roe", "roic",
-                "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio",
+                "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio", "foreign_net_buy_volume", "foreign_net_buy_value",
                 "eps_cagr_3y_window_years", "eps_cagr_3y_asof", "eps_cagr_3y_sample_count", "eps_cagr_5y_window_years", "eps_cagr_5y_asof", "eps_cagr_5y_sample_count", "eps_yoy_q_window_years", "eps_yoy_q_asof", "eps_yoy_q_sample_count", "sales_cagr_3y_window_years", "sales_cagr_3y_asof", "sales_cagr_3y_sample_count", "has_price_5y", "has_price_10y", "calc_version",
             ]
             rows = self._to_sql_records(frame, cols)
@@ -427,7 +451,7 @@ class Repository:
                     vol_20d, ret_1w, ret_1m, ret_3m, ret_6m, ret_1y, eps_cagr_3y, eps_cagr_5y, eps_yoy_q, eps_growth_ttm, eps_qoq, sales_growth_qoq, sales_growth_ttm, sales_cagr_3y, sales_cagr_5y,
                     pe_ratio, forward_pe, ps_ratio, pb_ratio, peg_ratio, ps, peg, ev, ev_sales, ev_ebitda,
                     gross_margin, operating_margin, net_margin, roa, roe, roic,
-                    debt_equity, lt_debt_equity, current_ratio, quick_ratio, payout_ratio,
+                    debt_equity, lt_debt_equity, current_ratio, quick_ratio, payout_ratio, foreign_net_buy_volume, foreign_net_buy_value,
                     eps_cagr_3y_window_years, eps_cagr_3y_asof, eps_cagr_3y_sample_count, eps_cagr_5y_window_years, eps_cagr_5y_asof, eps_cagr_5y_sample_count, eps_yoy_q_window_years, eps_yoy_q_asof, eps_yoy_q_sample_count, sales_cagr_3y_window_years, sales_cagr_3y_asof, sales_cagr_3y_sample_count, has_price_5y, has_price_10y, calc_version
                 ) VALUES ({placeholders})
                 """,
@@ -486,15 +510,17 @@ class Repository:
                c.mcap,
                f.per, f.pbr, f.div, f.dps, f.reserve_ratio,
                fin.eps, fin.bps, fin.fiscal_period, fin.period_type,
-               fin.reported_date, fin.consolidation_type, fin.source AS financial_source
+               fin.reported_date, fin.consolidation_type, fin.source AS financial_source,
+               flow.foreign_net_buy_volume, flow.foreign_net_buy_value
         FROM ticker_master t
         LEFT JOIN cap_daily c ON c.ticker = t.ticker AND c.date = ?
         LEFT JOIN fundamental_daily f ON f.ticker = t.ticker AND f.date = ?
         LEFT JOIN fin ON fin.ticker = t.ticker
+        LEFT JOIN investor_flow_daily flow ON flow.ticker = t.ticker AND flow.date = ?
         WHERE t.active_flag = 1
         """
         with db_session(self.db_path) as conn:
-            return pd.read_sql_query(query, conn, params=(dt, dt, dt))
+            return pd.read_sql_query(query, conn, params=(dt, dt, dt, dt))
 
     def get_fundamental_window(self, end_date: str, years: int = 6) -> pd.DataFrame:
         """Backward-compatible alias: prefers periodic fundamental source for growth windows."""
