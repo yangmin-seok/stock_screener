@@ -93,6 +93,7 @@ def test_build_snapshot_includes_technical_and_foreign_metrics_with_nan_defaults
             "volume": [1000] * len(dates),
             "value": [101000.0] * len(dates),
             "foreign_net_buy_volume": [np.nan] * 11 + [100.0] * 20,
+            "foreign_net_buy_value": [np.nan] * 11 + [1_000.0] * 20,
         }
     )
 
@@ -138,12 +139,13 @@ def test_build_snapshot_includes_technical_and_foreign_metrics_with_nan_defaults
     snapshot = build_snapshot(price_window=price_window, daily=daily, fund_hist=fund_hist, asof_date=asof_date)
     row = snapshot.iloc[0]
 
-    assert {"rsi_14", "atr_14", "gap_pct", "foreign_net_buy_volume_20d", "foreign_net_buy_ratio"}.issubset(snapshot.columns)
+    assert {"rsi_14", "atr_14", "gap_pct", "foreign_net_buy_volume_20d", "foreign_net_buy_ratio", "foreign_net_buy_value_20d"}.issubset(snapshot.columns)
     assert row["rsi_14"] == 50.0
     assert row["atr_14"] == 3.0
     assert row["gap_pct"] == 100.0 / 101.0 - 1
     assert row["foreign_net_buy_volume_20d"] == 100.0
     assert row["foreign_net_buy_ratio"] == 1.0
+    assert row["foreign_net_buy_value_20d"] == 20_000.0
 
 
 def test_build_snapshot_foreign_metrics_default_to_nan_when_input_column_missing():
@@ -195,3 +197,4 @@ def test_build_snapshot_foreign_metrics_default_to_nan_when_input_column_missing
     assert pd.isna(row["foreign_net_buy_volume"])
     assert pd.isna(row["foreign_net_buy_volume_20d"])
     assert pd.isna(row["foreign_net_buy_ratio"])
+    assert pd.isna(row["foreign_net_buy_value_20d"])

@@ -132,6 +132,14 @@ def build_snapshot(
             g["foreign_net_buy_volume_20d"] = np.nan
             g["foreign_net_buy_ratio"] = np.nan
 
+        if "foreign_net_buy_value" in g.columns:
+            g["foreign_net_buy_value_20d"] = g["foreign_net_buy_value"].rolling(
+                FOREIGN_NET_BUY_WINDOW,
+                min_periods=FOREIGN_NET_BUY_WINDOW,
+            ).sum()
+        else:
+            g["foreign_net_buy_value_20d"] = np.nan
+
         for name, n in [("ret_1w", 5), ("ret_1m", 21), ("ret_3m", 63), ("ret_6m", 126), ("ret_1y", 252)]:
             g[name] = g["close"].pct_change(n)
         groups.append(g.iloc[-1])
@@ -149,6 +157,8 @@ def build_snapshot(
         merged["foreign_net_buy_volume_20d"] = np.nan
     if "foreign_net_buy_ratio" not in merged.columns:
         merged["foreign_net_buy_ratio"] = np.nan
+    if "foreign_net_buy_value_20d" not in merged.columns:
+        merged["foreign_net_buy_value_20d"] = np.nan
     merged["close"] = merged["close"].astype(float)
     eps_num = pd.to_numeric(merged["eps"], errors="coerce")
     bps_num = pd.to_numeric(merged["bps"], errors="coerce")
@@ -272,7 +282,7 @@ def build_snapshot(
         "vol_20d", "rsi_14", "atr_14", "gap_pct", "chg_from_open_pct", "volatility_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_3y", "eps_cagr_5y", "eps_yoy_q", "eps_growth_ttm", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_3y", "sales_cagr_5y",
         "pe_ratio", "forward_pe", "ps_ratio", "pb_ratio", "peg_ratio", "ps", "peg", "ev", "ev_sales", "ev_ebitda",
         "gross_margin", "operating_margin", "net_margin", "roa", "roe", "roic",
-        "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio", "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_ratio", "foreign_net_buy_value",
+        "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio", "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_ratio", "foreign_net_buy_value", "foreign_net_buy_value_20d",
         "eps_cagr_3y_window_years", "eps_cagr_3y_asof", "eps_cagr_3y_sample_count",
         "eps_cagr_5y_window_years", "eps_cagr_5y_asof", "eps_cagr_5y_sample_count",
         "eps_yoy_q_window_years", "eps_yoy_q_asof", "eps_yoy_q_sample_count",
