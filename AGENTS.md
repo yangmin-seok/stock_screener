@@ -35,6 +35,8 @@
 
 ### Current status
 - DART primary provider + pykrx fallback provider are connected and running in production batch path.
+  - `DART_FINANCIALS_ENDPOINT`는 운영 override 용도이며, 미설정 시 endpoint 기본값은 `None`으로 유지한다.
+  - endpoint 미설정 상태에서는 DART provider output이 0 rows일 수 있으며 fallback(pykrx) 경로가 정상 동작해야 한다.
   - Financial merge priority is applied as `is_correction > reported_date > source_priority`.
 - Quarterly financial canonicalization is **implemented and 운영 중** via `financials_periodic`.
   - `financials_daily` remains collection/audit history keyed by collection date.
@@ -42,6 +44,12 @@
 - EPS/BPS null observability is **강화 완료/운영 중**.
   - Batch logs include source output, merged output, and pre-upsert null/non-null counts by chunk/date.
 - Remaining issue: upstream source gaps can still produce snapshot-level `eps`, `bps` nulls on 일부 종목.
+
+### Env operation note (DART)
+- `DART_FINANCIALS_ENDPOINT` 제거 방법:
+  - 현재 세션: `unset DART_FINANCIALS_ENDPOINT`
+  - `.env`: 해당 키 라인 삭제 후 프로세스 재시작
+  - 쉘 시작 파일(`~/.bashrc`, `~/.zshrc`): `export` 라인 제거 후 `source`
 
 ### Known risks
 - Growth metrics can be biased if repeated fiscal periods are treated as independent time points.

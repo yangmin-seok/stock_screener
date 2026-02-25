@@ -155,8 +155,15 @@ python -m stock_screener.cli --db-path data/screener.db --update-reserve-only --
 
 ## 운영 설정 및 보안
 - `.env`에 `DART_API_KEY`를 설정해야 DART 기반 펀더멘털 수집이 동작합니다.
+- `DART_FINANCIALS_ENDPOINT`는 **옵션**입니다. 미설정 시 DART primary provider는 endpoint 미연결 상태(`None`)로 동작하며, 파이프라인은 fallback provider 경로를 그대로 사용합니다.
+- `DART_FINANCIALS_ENDPOINT`를 설정한 경우에만 해당 endpoint를 사용합니다.
 - 운영 환경에서는 키를 시크릿 매니저/환경변수로 주입하고, 저장소에 직접 커밋하지 마세요.
 - `.env`/API 키 평문 파일은 반드시 `.gitignore`로 관리하고, 로그 출력 시 키 마스킹을 유지하세요.
+
+### 환경변수 제거 방법 (`DART_FINANCIALS_ENDPOINT`)
+- 현재 쉘 세션에서 제거: `unset DART_FINANCIALS_ENDPOINT`
+- `.env`에서 제거: `DART_FINANCIALS_ENDPOINT=...` 라인을 삭제 후 앱/프로세스 재시작
+- 쉘 시작 파일(`~/.bashrc`, `~/.zshrc`)에서 `export DART_FINANCIALS_ENDPOINT=...`를 제거 후 `source`로 반영
 
 ## 실행 시간 가이드
 - **전체 수집 + 스냅샷**: 최초 1회는 티커×기간 API 호출 때문에 수 분~수십 분이 걸릴 수 있습니다.
