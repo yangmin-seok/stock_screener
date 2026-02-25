@@ -81,6 +81,29 @@ def test_daily_batch_financial_provider_order(monkeypatch, tmp_path):
     assert providers == ["dart_primary", "pykrx_fallback"]
 
 
+
+
+def test_daily_batch_uses_default_dart_endpoint_when_env_not_set(monkeypatch, tmp_path):
+    monkeypatch.setenv("DART_API_KEY", "dummy-key")
+    monkeypatch.delenv("DART_FINANCIALS_ENDPOINT", raising=False)
+
+    pipeline = DailyBatchPipeline(tmp_path / "x.db")
+    pipeline._ensure_dart_client()
+
+    assert pipeline.dart_client is not None
+    assert pipeline.dart_client.endpoint == "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json"
+
+
+def test_daily_batch_allows_dart_endpoint_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("DART_API_KEY", "dummy-key")
+    monkeypatch.setenv("DART_FINANCIALS_ENDPOINT", "https://example.com/custom")
+
+    pipeline = DailyBatchPipeline(tmp_path / "x.db")
+    pipeline._ensure_dart_client()
+
+    assert pipeline.dart_client is not None
+    assert pipeline.dart_client.endpoint == "https://example.com/custom"
+
 def test_daily_batch_chunk_logs_financial_non_null_counts(monkeypatch, tmp_path):
     monkeypatch.setenv("DART_API_KEY", "dummy-key")
     pipeline = DailyBatchPipeline(tmp_path / "x.db")
