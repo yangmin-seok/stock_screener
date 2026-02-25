@@ -394,3 +394,120 @@ def test_financial_quality_reports_and_top_null_tickers(tmp_path):
     top_tickers = repo.get_financial_quality_top_null_tickers("2026-02-20", limit=2)
     assert top_tickers["ticker"].tolist() == ["000660", "005930"]
     assert top_tickers.iloc[0]["null_total"] == 3
+
+
+
+def test_replace_snapshot_persists_new_snapshot_metric_columns(tmp_path):
+    db = tmp_path / "x.db"
+    init_db(db)
+    repo = Repository(db)
+
+    snapshot_row = {
+        "asof_date": "2025-01-31",
+        "ticker": "AAA",
+        "name": "Alpha",
+        "market": "KOSPI",
+        "close": 101.0,
+        "mcap": 1_000_000_000.0,
+        "avg_value_20d": 100_000.0,
+        "current_value": 101_000.0,
+        "relative_value": 1.01,
+        "turnover_20d": 0.01,
+        "per": 10.0,
+        "pbr": 1.2,
+        "div": 1.0,
+        "dps": 100.0,
+        "eps": 200.0,
+        "bps": 1000.0,
+        "reserve_ratio": 300.0,
+        "fiscal_period": "2024Q4",
+        "period_type": "quarterly",
+        "reported_date": "2025-01-20",
+        "consolidation_type": "C",
+        "financial_source": "unit",
+        "roe_proxy": 0.2,
+        "eps_positive": 1,
+        "sma20": 100.0,
+        "sma50": 100.0,
+        "sma200": 100.0,
+        "dist_sma20": 0.01,
+        "dist_sma50": 0.01,
+        "dist_sma200": 0.01,
+        "high_52w": 120.0,
+        "low_52w": 80.0,
+        "pos_52w": 0.525,
+        "near_52w_high_ratio": 0.841666,
+        "vol_20d": 0.01,
+        "rsi_14": 55.0,
+        "atr_14": 1.5,
+        "gap_pct": -0.01,
+        "chg_from_open_pct": 0.02,
+        "volatility_20d": 0.18,
+        "ret_1w": 0.01,
+        "ret_1m": 0.02,
+        "ret_3m": 0.03,
+        "ret_6m": 0.04,
+        "ret_1y": 0.05,
+        "eps_cagr_3y": 0.1,
+        "eps_cagr_5y": 0.2,
+        "eps_yoy_q": 0.11,
+        "eps_growth_ttm": 0.12,
+        "eps_qoq": 0.13,
+        "sales_growth_qoq": 0.14,
+        "sales_growth_ttm": 0.15,
+        "sales_cagr_3y": 0.16,
+        "sales_cagr_5y": 0.17,
+        "pe_ratio": 10.0,
+        "forward_pe": pd.NA,
+        "ps_ratio": 1.5,
+        "pb_ratio": 1.2,
+        "peg_ratio": 0.8,
+        "ps": 1.5,
+        "peg": 0.8,
+        "ev": pd.NA,
+        "ev_sales": pd.NA,
+        "ev_ebitda": pd.NA,
+        "gross_margin": pd.NA,
+        "operating_margin": 0.1,
+        "net_margin": 0.08,
+        "roa": pd.NA,
+        "roe": 0.2,
+        "roic": pd.NA,
+        "debt_equity": pd.NA,
+        "lt_debt_equity": pd.NA,
+        "current_ratio": pd.NA,
+        "quick_ratio": pd.NA,
+        "payout_ratio": 0.5,
+        "foreign_net_buy_volume": 1234.0,
+        "foreign_net_buy_volume_20d": 1000.0,
+        "foreign_net_buy_ratio": 1.234,
+        "foreign_net_buy_value": 5_000_000.0,
+        "eps_cagr_3y_window_years": 3,
+        "eps_cagr_3y_asof": "2024Q4",
+        "eps_cagr_3y_sample_count": 4,
+        "eps_cagr_5y_window_years": 5,
+        "eps_cagr_5y_asof": "2024Q4",
+        "eps_cagr_5y_sample_count": 8,
+        "eps_yoy_q_window_years": 1,
+        "eps_yoy_q_asof": "2024Q4",
+        "eps_yoy_q_sample_count": 2,
+        "sales_cagr_3y_window_years": 3,
+        "sales_cagr_3y_asof": "2024Q4",
+        "sales_cagr_3y_sample_count": 4,
+        "has_price_5y": 0,
+        "has_price_10y": 0,
+        "calc_version": "v1.4",
+    }
+
+    frame = pd.DataFrame([snapshot_row])
+    inserted = repo.replace_snapshot("2025-01-31", frame)
+    loaded = repo.load_snapshot("2025-01-31")
+
+    assert inserted == 1
+    assert len(loaded) == 1
+    row = loaded.iloc[0]
+    assert float(row["rsi_14"]) == 55.0
+    assert float(row["atr_14"]) == 1.5
+    assert float(row["gap_pct"]) == -0.01
+    assert float(row["foreign_net_buy_volume_20d"]) == 1000.0
+    assert float(row["foreign_net_buy_ratio"]) == 1.234

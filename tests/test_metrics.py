@@ -75,3 +75,123 @@ def test_build_snapshot_includes_expanded_fundamental_metrics_with_nan_fallback(
     assert np.isnan(row["ev_ebitda"])
     assert np.isnan(row["debt_equity"])
     assert row["payout_ratio"] == 0.5
+
+
+
+def test_build_snapshot_includes_technical_and_foreign_metrics_with_nan_defaults():
+    asof_date = "2025-01-31"
+    dates = pd.date_range("2025-01-01", periods=31, freq="D")
+
+    price_window = pd.DataFrame(
+        {
+            "date": [d.strftime("%Y-%m-%d") for d in dates],
+            "ticker": ["AAA"] * len(dates),
+            "open": [100.0] * len(dates),
+            "high": [102.0] * len(dates),
+            "low": [99.0] * len(dates),
+            "close": [101.0] * len(dates),
+            "volume": [1000] * len(dates),
+            "value": [101000.0] * len(dates),
+            "foreign_net_buy_volume": [np.nan] * 11 + [100.0] * 20,
+        }
+    )
+
+    daily = pd.DataFrame(
+        [
+            {
+                "ticker": "AAA",
+                "name": "Alpha",
+                "market": "KOSPI",
+                "mcap": 1_000_000_000,
+                "per": 10.0,
+                "pbr": 1.0,
+                "div": 0.0,
+                "dps": 0.0,
+                "reserve_ratio": 200.0,
+                "eps": 100.0,
+                "bps": 1000.0,
+                "fiscal_period": "2024Q4",
+                "period_type": "quarterly",
+                "reported_date": "2025-01-15",
+                "consolidation_type": "C",
+                "financial_source": "unit",
+            }
+        ]
+    )
+
+    fund_hist = pd.DataFrame(
+        [
+            {
+                "ticker": "AAA",
+                "fiscal_period": "2024Q4",
+                "period_type": "quarterly",
+                "consolidation_type": "C",
+                "revenue": 100.0,
+                "operating_income": 10.0,
+                "net_income": 8.0,
+                "eps": 10.0,
+                "reported_date": "2025-01-15",
+            }
+        ]
+    )
+
+    snapshot = build_snapshot(price_window=price_window, daily=daily, fund_hist=fund_hist, asof_date=asof_date)
+    row = snapshot.iloc[0]
+
+    assert {"rsi_14", "atr_14", "gap_pct", "foreign_net_buy_volume_20d", "foreign_net_buy_ratio"}.issubset(snapshot.columns)
+    assert row["rsi_14"] == 50.0
+    assert row["atr_14"] == 3.0
+    assert row["gap_pct"] == 100.0 / 101.0 - 1
+    assert row["foreign_net_buy_volume_20d"] == 100.0
+    assert row["foreign_net_buy_ratio"] == 1.0
+
+
+def test_build_snapshot_foreign_metrics_default_to_nan_when_input_column_missing():
+    asof_date = "2025-01-31"
+    dates = pd.date_range("2025-01-01", periods=31, freq="D")
+    price_window = pd.DataFrame(
+        {
+            "date": [d.strftime("%Y-%m-%d") for d in dates],
+            "ticker": ["BBB"] * len(dates),
+            "open": [100.0] * len(dates),
+            "high": [102.0] * len(dates),
+            "low": [99.0] * len(dates),
+            "close": [101.0] * len(dates),
+            "volume": [1000] * len(dates),
+            "value": [101000.0] * len(dates),
+        }
+    )
+    daily = pd.DataFrame(
+        [
+            {
+                "ticker": "BBB",
+                "name": "Beta",
+                "market": "KOSDAQ",
+                "mcap": 500_000_000,
+                "per": 10.0,
+                "pbr": 1.0,
+                "div": 0.0,
+                "dps": 0.0,
+                "reserve_ratio": 200.0,
+                "eps": 100.0,
+                "bps": 1000.0,
+                "fiscal_period": "2024Q4",
+                "period_type": "quarterly",
+                "reported_date": "2025-01-15",
+                "consolidation_type": "C",
+                "financial_source": "unit",
+            }
+        ]
+    )
+
+    snapshot = build_snapshot(
+        price_window=price_window,
+        daily=daily,
+        fund_hist=pd.DataFrame(columns=["ticker", "fiscal_period", "period_type", "consolidation_type", "reported_date"]),
+        asof_date=asof_date,
+    )
+    row = snapshot.iloc[0]
+
+    assert pd.isna(row["foreign_net_buy_volume"])
+    assert pd.isna(row["foreign_net_buy_volume_20d"])
+    assert pd.isna(row["foreign_net_buy_ratio"])

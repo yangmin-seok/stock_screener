@@ -15,6 +15,7 @@ import streamlit as st
 from stock_screener.pipelines.daily_batch import BatchCancelledError, DailyBatchPipeline
 from stock_screener.storage.db import init_db
 from stock_screener.storage.repository import Repository
+from stock_screener.web.filter_query import prune_query_filter_state
 
 DB_PATH = Path("data/screener.db")
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -2014,102 +2015,7 @@ for spec in FILTER_SPECS:
     if serialized is not None:
         query_filter_state[spec.name] = serialized
 
-if mcap_filter_mode != "직접 입력":
-    query_filter_state.pop("mcap_min_custom", None)
-    query_filter_state.pop("mcap_max_custom", None)
-if mcap_filter_mode != "구간 선택":
-    query_filter_state.pop("mcap_bucket", None)
-
-if price_filter_mode != "직접 입력":
-    query_filter_state.pop("price_min_custom", None)
-    query_filter_state.pop("price_max_custom", None)
-if price_filter_mode != "구간 선택":
-    query_filter_state.pop("price_bucket", None)
-
-if div_filter_mode != "직접 입력":
-    query_filter_state.pop("div_min_custom", None)
-    query_filter_state.pop("div_max_custom", None)
-if div_filter_mode != "구간 선택":
-    query_filter_state.pop("div_bucket", None)
-
-if value_filter_mode != "직접 입력":
-    query_filter_state.pop("value_min_custom", None)
-    query_filter_state.pop("value_max_custom", None)
-if value_filter_mode != "구간 선택":
-    query_filter_state.pop("value_bucket", None)
-
-if relvol_filter_mode != "직접 입력":
-    query_filter_state.pop("relvol_min_custom", None)
-    query_filter_state.pop("relvol_max_custom", None)
-if relvol_filter_mode != "구간 선택":
-    query_filter_state.pop("relvol_bucket", None)
-
-if momentum_filter_mode != "직접 입력":
-    query_filter_state.pop("momentum_min_custom", None)
-    query_filter_state.pop("momentum_max_custom", None)
-if momentum_filter_mode != "구간 선택":
-    query_filter_state.pop("momentum_bucket", None)
-if momentum_filter_mode == "Any":
-    query_filter_state.pop("momentum_metric", None)
-
-if ev_ebitda_filter_mode != "직접 입력":
-    query_filter_state.pop("ev_ebitda_min_custom", None)
-    query_filter_state.pop("ev_ebitda_max_custom", None)
-if ev_ebitda_filter_mode != "구간 선택":
-    query_filter_state.pop("ev_ebitda_bucket", None)
-
-if st.session_state.get("rsi_filter_mode") != "직접 입력":
-    query_filter_state.pop("rsi_min_custom", None)
-    query_filter_state.pop("rsi_max_custom", None)
-if st.session_state.get("rsi_filter_mode") != "구간 선택":
-    query_filter_state.pop("rsi_bucket", None)
-
-if st.session_state.get("atr_filter_mode") != "직접 입력":
-    query_filter_state.pop("atr_min_custom", None)
-    query_filter_state.pop("atr_max_custom", None)
-if st.session_state.get("atr_filter_mode") != "구간 선택":
-    query_filter_state.pop("atr_bucket", None)
-
-if st.session_state.get("gap_filter_mode") != "직접 입력":
-    query_filter_state.pop("gap_min_custom", None)
-    query_filter_state.pop("gap_max_custom", None)
-if st.session_state.get("gap_filter_mode") != "구간 선택":
-    query_filter_state.pop("gap_bucket", None)
-
-if st.session_state.get("chg_open_filter_mode") != "직접 입력":
-    query_filter_state.pop("chg_open_min_custom", None)
-    query_filter_state.pop("chg_open_max_custom", None)
-if st.session_state.get("chg_open_filter_mode") != "구간 선택":
-    query_filter_state.pop("chg_open_bucket", None)
-
-if st.session_state.get("volatility_filter_mode") != "직접 입력":
-    query_filter_state.pop("volatility_min_custom", None)
-    query_filter_state.pop("volatility_max_custom", None)
-if st.session_state.get("volatility_filter_mode") != "구간 선택":
-    query_filter_state.pop("volatility_bucket", None)
-
-if st.session_state.get("foreign_buy_filter_mode") != "직접 입력":
-    query_filter_state.pop("foreign_buy_min_custom", None)
-    query_filter_state.pop("foreign_buy_max_custom", None)
-if st.session_state.get("foreign_buy_filter_mode") != "구간 선택":
-    query_filter_state.pop("foreign_buy_bucket", None)
-
-if st.session_state.get("foreign_buy2_filter_mode") != "직접 입력":
-    query_filter_state.pop("foreign_buy2_min_custom", None)
-    query_filter_state.pop("foreign_buy2_max_custom", None)
-if st.session_state.get("foreign_buy2_filter_mode") != "구간 선택":
-    query_filter_state.pop("foreign_buy2_bucket", None)
-if st.session_state.get("foreign_buy2_metric") == "none":
-    query_filter_state.pop("foreign_buy2_filter_mode", None)
-    query_filter_state.pop("foreign_buy2_metric", None)
-
-for prefix in ("dist_sma20", "dist_sma50", "dist_sma200", "near_high", "near_low"):
-    mode = st.session_state.get(f"{prefix}_filter_mode", "Any")
-    if mode != "직접 입력":
-        query_filter_state.pop(f"{prefix}_min_custom", None)
-        query_filter_state.pop(f"{prefix}_max_custom", None)
-    if mode != "구간 선택":
-        query_filter_state.pop(f"{prefix}_bucket", None)
+query_filter_state = prune_query_filter_state(query_filter_state, st.session_state)
 
 _set_query_params(query_filter_state)
 
