@@ -302,7 +302,7 @@ class DailyBatchPipeline:
         if rebuild_snapshot:
             price_window = self.repo.get_price_window(asof_str, window=lookback_days)
             daily = self.repo.get_daily_join(asof_str)
-            fund_hist = self.repo.get_fundamental_window(asof_str, years=11)
+            fund_hist = self.repo.get_fundamental_window_periodic(asof_str, years=11)
             snapshot = build_snapshot(price_window, daily, fund_hist, asof_str)
             snap_rows = self.repo.replace_snapshot(asof_str, snapshot)
             snapshot_rebuilt = True
@@ -349,7 +349,7 @@ class DailyBatchPipeline:
 
         price_window = self.repo.get_price_window(asof_str, window=lookback_days)
         daily = self.repo.get_daily_join(asof_str)
-        fund_hist = self.repo.get_fundamental_window(asof_str, years=11)
+        fund_hist = self.repo.get_fundamental_window_periodic(asof_str, years=11)
         if price_window.empty or daily.empty:
             raise ValueError(
                 f"No cached rows for asof={asof_str}. Run full collection for this date or choose an existing asof date."
