@@ -111,6 +111,12 @@ class Repository:
             return 0
         data = frame.copy()
         data["date"] = asof_date
+        for col, default in (("is_correction", 0), ("source_priority", 0)):
+            if col not in data.columns:
+                data[col] = default
+        data["is_correction"] = pd.to_numeric(data["is_correction"], errors="coerce").fillna(0).astype(int)
+        data["source_priority"] = pd.to_numeric(data["source_priority"], errors="coerce").fillna(0).astype(int)
+
         rows = self._to_sql_records(
             data,
             [
@@ -126,6 +132,8 @@ class Repository:
                 "net_income",
                 "eps",
                 "bps",
+                "is_correction",
+                "source_priority",
             ],
         )
         with db_session(self.db_path) as conn:
@@ -133,9 +141,10 @@ class Repository:
                 """
                 INSERT INTO financials_daily(
                     date, ticker, fiscal_period, period_type, reported_date, consolidation_type, source,
-                    revenue, operating_income, net_income, eps, bps, source_ts
+                    revenue, operating_income, net_income, eps, bps, source_ts,
+                    is_correction, source_priority
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
                 ON CONFLICT(date, ticker, fiscal_period, period_type, consolidation_type) DO UPDATE SET
                     reported_date=excluded.reported_date,
                     source=excluded.source,
@@ -144,6 +153,8 @@ class Repository:
                     net_income=COALESCE(excluded.net_income, financials_daily.net_income),
                     eps=COALESCE(excluded.eps, financials_daily.eps),
                     bps=COALESCE(excluded.bps, financials_daily.bps),
+                    is_correction=COALESCE(excluded.is_correction, financials_daily.is_correction),
+                    source_priority=COALESCE(excluded.source_priority, financials_daily.source_priority),
                     source_ts=CURRENT_TIMESTAMP
                 """,
                 rows,
@@ -297,18 +308,25 @@ class Repository:
     def get_daily_join(self, dt: str) -> pd.DataFrame:
         query = """
         WITH fin AS (
-            SELECT f.*
-            FROM financials_daily f
-            JOIN (
-                SELECT ticker,
-                       MAX(COALESCE(reported_date, fiscal_period, date)) AS rank_date
-                FROM financials_daily
-                WHERE date <= ?
-                GROUP BY ticker
+            SELECT *
+            FROM (
+                SELECT
+                    f.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY f.ticker
+                        ORDER BY
+                            (f.eps IS NOT NULL OR f.bps IS NOT NULL) DESC,
+                            f.reported_date DESC,
+                            f.fiscal_period DESC,
+                            f.date DESC,
+                            COALESCE(f.is_correction, 0) DESC,
+                            COALESCE(f.source_priority, 0) DESC,
+                            f.source_ts DESC
+                    ) AS rn
+                FROM financials_daily f
+                WHERE f.date <= ?
             ) ranked
-              ON ranked.ticker = f.ticker
-             AND COALESCE(f.reported_date, f.fiscal_period, f.date) = ranked.rank_date
-            WHERE f.date <= ?
+            WHERE ranked.rn = 1
         )
         SELECT t.ticker, t.name, t.market,
                c.mcap,
@@ -322,7 +340,7 @@ class Repository:
         WHERE t.active_flag = 1
         """
         with db_session(self.db_path) as conn:
-            return pd.read_sql_query(query, conn, params=(dt, dt, dt, dt))
+            return pd.read_sql_query(query, conn, params=(dt, dt, dt))
 
     def get_fundamental_window(self, end_date: str, years: int = 6) -> pd.DataFrame:
         """Backward-compatible alias: prefers periodic fundamental source for growth windows."""

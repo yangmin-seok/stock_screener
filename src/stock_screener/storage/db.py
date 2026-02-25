@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS financials_daily (
     eps REAL,
     bps REAL,
     source_ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    is_correction INTEGER,
+    source_priority INTEGER,
     PRIMARY KEY (date, ticker, fiscal_period, period_type, consolidation_type)
 );
 
@@ -202,6 +204,8 @@ def init_db(db_path: str | Path) -> None:
         _ensure_column(conn, "financials_periodic", "source_ts", "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP")
         _ensure_column(conn, "financials_periodic", "is_correction", "INTEGER")
         _ensure_column(conn, "financials_periodic", "source_priority", "INTEGER")
+        _ensure_column(conn, "financials_daily", "is_correction", "INTEGER")
+        _ensure_column(conn, "financials_daily", "source_priority", "INTEGER")
         _ensure_column(conn, "snapshot_metrics", "dps", "REAL")
         _ensure_column(conn, "fundamental_daily", "reserve_ratio", "REAL")
         _ensure_column(conn, "fundamental_daily", "div", "REAL")
