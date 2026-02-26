@@ -2,31 +2,41 @@ run:
   name: example_run
   start_date: "2021-01-01"
   end_date: "2021-12-31"
-  rebalance: monthly
+  rebalance: M
+  anchor: month_end
+  initial_capital: 100000000
 
 universe:
   market: [KOSPI, KOSDAQ]
-  min_price: null
 
 filters:
-  descriptive: {}
-  fundamental: {}
-  technical: {}
+  pbr:
+    enabled: false
+    field: pbr
+    op: range
+    min: 0.3
+    max: 1.2
+    inclusive: true
+    missing_policy: drop
 
 selection:
-  top_n: 20
-  sort_by: relative_value
-  ascending: false
+  mode: cap_n
+  cap_n: 20
+  sort_by: foreign_cum_value_20d
+  sort_direction: desc
+  min_holdings: 5
+  empty_selection_policy: cash
 
 portfolio:
   weighting: equal
-  max_positions: 20
+  max_weight: null
 
 costs:
-  commission_bps: 5
+  fee_bps: 5
   slippage_bps: 5
 
 output:
-  dir: outputs/backtest
+  dir: runs/backtests
   save_trades: true
-  save_daily_nav: true
+  save_positions: true
+  save_daily: true
