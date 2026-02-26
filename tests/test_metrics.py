@@ -143,8 +143,8 @@ def test_build_snapshot_includes_technical_and_foreign_metrics_with_nan_defaults
     assert row["rsi_14"] == 50.0
     assert row["atr_14"] == 3.0
     assert row["gap_pct"] == 100.0 / 101.0 - 1
-    assert row["foreign_net_buy_volume_20d"] == 100.0
-    assert row["foreign_net_buy_ratio"] == 1.0
+    assert row["foreign_net_buy_volume_20d"] == 2_000.0
+    assert row["foreign_net_buy_ratio"] == 0.05
     assert row["foreign_net_buy_value_20d"] == 20_000.0
 
 
