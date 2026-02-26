@@ -141,16 +141,22 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
             }
         )
 
-    equity_curve = pd.DataFrame(equity_records).drop_duplicates(subset=['date'], keep='last').sort_values('date')
-    if not equity_curve.empty:
+    if not equity_records:
+        equity_curve = pd.DataFrame(columns=['date', 'equity_close', 'return'])
+    else:
+        equity_curve = pd.DataFrame(equity_records).drop_duplicates(subset=['date'], keep='last').sort_values('date')
         equity_curve['return'] = equity_curve['equity_close'].pct_change().fillna(0.0)
 
     rebalance_log = pd.DataFrame(rebalance_records)
     trades = pd.DataFrame(trades_records)
 
+    final_equity = float(state.cash) if state.cash is not None else float(initial_capital)
+    if not equity_curve.empty:
+        final_equity = float(equity_curve['equity_close'].iloc[-1])
+
     summary = {
         'rebalances': len(rebalance_records),
-        'final_equity': float(equity_curve['equity_close'].iloc[-1]) if not equity_curve.empty else state.cash,
+        'final_equity': final_equity,
         'total_costs': float(rebalance_log['costs'].sum()) if not rebalance_log.empty else 0.0,
         'turnover': float(rebalance_log['turnover_notional'].sum()) if not rebalance_log.empty else 0.0,
         'number_of_trades': int(len(trades)),

@@ -110,3 +110,35 @@ def test_engine_costs_reduce_final_equity():
     res_cost = run_backtest(_cfg(fee_bps=50.0), repo)
 
     assert res_cost["summary"]["final_equity"] < res_no_cost["summary"]["final_equity"]
+
+
+def test_engine_handles_empty_equity_records_for_monthly_single_month():
+    repo = FakeRepo()
+    config = BacktestConfig(
+        run={
+            "name": "empty-equity",
+            "start_date": "2025-01-02",
+            "end_date": "2025-01-15",
+            "rebalance": "M",
+            "initial_capital": 1_000_000,
+        },
+        universe={},
+        filters={},
+        selection={
+            "mode": "cap_n",
+            "cap_n": 1,
+            "sort_by": "foreign_cum_value_20d",
+            "sort_direction": "desc",
+            "empty_selection_policy": "cash",
+        },
+        portfolio={"weighting": "equal"},
+        costs={"fee_bps": 0.0, "slippage_bps": 0.0},
+        output={},
+    )
+
+    result = run_backtest(config, repo)
+
+    assert isinstance(result, dict)
+    assert result["equity_curve"].empty
+    assert list(result["equity_curve"].columns) == ["date", "equity_close", "return"]
+    assert result["summary"]["final_equity"] == 1_000_000
