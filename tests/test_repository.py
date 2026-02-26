@@ -72,6 +72,49 @@ def test_get_daily_join_prefers_non_null_financials_over_newer_null_row(tmp_path
     assert row["period_type"] == "quarterly"
     assert row["reported_date"] == "2024-11-20"
     assert row["financial_source"] == "fallback"
+
+
+def test_get_price_window_includes_foreign_flow_columns(tmp_path):
+    db = tmp_path / "x.db"
+    init_db(db)
+    repo = Repository(db)
+
+    repo.upsert_prices(
+        pd.DataFrame(
+            [
+                {
+                    "date": "2025-01-31",
+                    "ticker": "AAA",
+                    "open": 100.0,
+                    "high": 110.0,
+                    "low": 95.0,
+                    "close": 105.0,
+                    "volume": 1_000,
+                    "value": 105_000.0,
+                }
+            ]
+        )
+    )
+    repo.upsert_investor_flow(
+        pd.DataFrame(
+            [
+                {
+                    "date": "2025-01-31",
+                    "ticker": "AAA",
+                    "foreign_net_buy_volume": 123.0,
+                    "foreign_net_buy_value": 987_654.0,
+                }
+            ]
+        )
+    )
+
+    window = repo.get_price_window("2025-01-31", window=10)
+
+    assert "foreign_net_buy_volume" in window.columns
+    assert "foreign_net_buy_value" in window.columns
+    row = window.iloc[0]
+    assert float(row["foreign_net_buy_volume"]) == 123.0
+    assert float(row["foreign_net_buy_value"]) == 987_654.0
 import sqlite3
 
 from stock_screener.collectors.dart_financial_provider import DartFinancialProvider

@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import streamlit as st
+import pandas as pd
 
 from stock_screener.pipelines.daily_batch import BatchCancelledError, DailyBatchPipeline
 from stock_screener.storage.db import init_db
@@ -770,10 +771,13 @@ def _apply_range_mode_filter(
     bucket_map: dict[str, tuple[float | None, float | None]],
     min_custom: float,
     max_custom: float,
+    exclude_zero: bool = False,
 ):
     if mode == "Any":
         return frame
     scoped = frame[frame[col].notna()]
+    if exclude_zero:
+        scoped = scoped[scoped[col] != 0]
     if mode == "구간 선택":
         lower, upper = bucket_map.get(bucket, (None, None))
         if lower is not None:
@@ -2026,6 +2030,7 @@ if technical_metric_availability.get(selected_foreign_metric, False):
         )["bucket_options"],
         min_custom=st.session_state.get("foreign_buy_min_custom", 0.0),
         max_custom=st.session_state.get("foreign_buy_max_custom", 0.0),
+        exclude_zero=True,
     )
 if apply_eps_cagr_5y:
     filtered = filtered[(filtered["eps_cagr_5y"].notna()) & (filtered["eps_cagr_5y"] >= eps_cagr_5y_min)]
@@ -2061,6 +2066,12 @@ sort_col = st.selectbox(
 ascending = st.checkbox("오름차순", key="ascending")
 limit = st.slider("출력 개수", min_value=10, max_value=500, step=10, key="limit")
 
+effective_ascending = ascending
+if apply_pbr_max and sort_col == "pbr":
+    effective_ascending = True
+    if not ascending:
+        st.caption("최대 PBR 적용 시에는 저PBR 탐색을 위해 PBR 오름차순으로 정렬합니다.")
+
 query_filter_state: dict[str, Any] = {}
 for spec in FILTER_SPECS:
     serialized = _serialize_query_filter_value(spec, st.session_state.get(spec.name, spec.default))
@@ -2077,7 +2088,7 @@ st.caption("필터 상태가 URL에 자동 반영됩니다. 링크를 복사해 
 st.code(share_link or "(기본 필터 상태: 공유할 추가 파라미터 없음)", language="text")
 st.button("공유 링크 복사", disabled=True, help="브라우저 주소창 URL을 복사해 공유하세요.")
 
-filtered = filtered.sort_values(sort_col, ascending=ascending).head(limit)
+filtered = filtered.sort_values(sort_col, ascending=effective_ascending).head(limit)
 
 if ticker_list:
     st.caption(f"티커 직접 입력: {len(ticker_list)}개 중 {len(ticker_list) - len(missing_tickers)}개 매칭")

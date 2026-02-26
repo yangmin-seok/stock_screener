@@ -1,4 +1,5 @@
 import pandas as pd
+from unittest.mock import patch
 
 from stock_screener.collectors.pykrx_client import PykrxCollector
 
@@ -64,3 +65,30 @@ def test_normalize_foreign_investor_flow_sets_missing_metric_columns_to_na():
     assert out.loc[0, "ticker"] == "005930"
     assert pd.isna(out.loc[0, "foreign_net_buy_volume"])
     assert pd.isna(out.loc[0, "foreign_net_buy_value"])
+
+
+def test_foreign_investor_flow_continues_when_one_market_call_fails():
+    collector = PykrxCollector(retries=1)
+    dt = pd.Timestamp("2026-01-02").date()
+
+    kosdaq_frame = pd.DataFrame(
+        {
+            "순매수수량": ["10"],
+            "순매수대금": ["1000"],
+        },
+        index=["005930"],
+    )
+
+    def side_effect(*args, **kwargs):  # noqa: ANN002, ANN003
+        market = args[2]
+        if market == "KOSPI":
+            raise RuntimeError("upstream error")
+        return kosdaq_frame
+
+    with patch("stock_screener.collectors.pykrx_client.stock.get_market_net_purchases_of_equities_by_ticker", side_effect=side_effect):
+        out = collector.foreign_investor_flow(dt)
+
+    assert len(out) == 1
+    assert out.iloc[0]["ticker"] == "005930"
+    assert float(out.iloc[0]["foreign_net_buy_volume"]) == 10.0
+    assert float(out.iloc[0]["foreign_net_buy_value"]) == 1000.0

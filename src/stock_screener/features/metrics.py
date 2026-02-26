@@ -123,19 +123,21 @@ def build_snapshot(
         g["volatility_20d"] = g["ret_daily"].rolling(VOLATILITY_WINDOW, min_periods=VOLATILITY_WINDOW).std() * np.sqrt(252)
 
         if "foreign_net_buy_volume" in g.columns:
-            g["foreign_net_buy_volume_20d"] = g["foreign_net_buy_volume"].rolling(
+            volume_series = pd.to_numeric(g["foreign_net_buy_volume"], errors="coerce").fillna(0.0)
+            g["foreign_net_buy_volume_20d"] = volume_series.rolling(
                 FOREIGN_NET_BUY_WINDOW,
-                min_periods=FOREIGN_NET_BUY_WINDOW,
-            ).mean()
+                min_periods=1,
+            ).sum()
             g["foreign_net_buy_ratio"] = _safe_ratio(g["foreign_net_buy_volume"], g["foreign_net_buy_volume_20d"])
         else:
             g["foreign_net_buy_volume_20d"] = np.nan
             g["foreign_net_buy_ratio"] = np.nan
 
         if "foreign_net_buy_value" in g.columns:
-            g["foreign_net_buy_value_20d"] = g["foreign_net_buy_value"].rolling(
+            value_series = pd.to_numeric(g["foreign_net_buy_value"], errors="coerce").fillna(0.0)
+            g["foreign_net_buy_value_20d"] = value_series.rolling(
                 FOREIGN_NET_BUY_WINDOW,
-                min_periods=FOREIGN_NET_BUY_WINDOW,
+                min_periods=1,
             ).sum()
         else:
             g["foreign_net_buy_value_20d"] = np.nan
@@ -150,6 +152,15 @@ def build_snapshot(
     latest = latest[latest["asof_date"] == asof_date]
 
     merged = latest.merge(daily, how="left", on="ticker")
+    for col in ("foreign_net_buy_volume", "foreign_net_buy_value"):
+        from_latest = f"{col}_x"
+        from_daily = f"{col}_y"
+        if from_latest in merged.columns or from_daily in merged.columns:
+            merged[col] = pd.to_numeric(merged.get(from_daily), errors="coerce").combine_first(
+                pd.to_numeric(merged.get(from_latest), errors="coerce")
+            )
+            merged.drop(columns=[c for c in (from_latest, from_daily) if c in merged.columns], inplace=True)
+
     for col in ("foreign_net_buy_volume", "foreign_net_buy_value"):
         if col not in merged.columns:
             merged[col] = np.nan
