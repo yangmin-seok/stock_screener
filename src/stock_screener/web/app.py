@@ -1925,13 +1925,15 @@ with backtest_tab:
             bt_result = st.session_state.get("backtest_result")
             if bt_result:
                 bt_summary = bt_result.get("summary", {})
-                k1, k2, k3 = st.columns(3)
+                k1, k2, k3, k4 = st.columns(4)
                 with k1:
                     st.metric("최종 자산", f"{float(bt_summary.get('final_equity', 0.0)):,.0f}")
                 with k2:
                     st.metric("리밸 횟수", int(bt_summary.get("rebalances", 0)))
                 with k3:
                     st.metric("총 비용", f"{float(bt_summary.get('total_costs', 0.0)):,.0f}")
+                with k4:
+                    st.metric("스킵 횟수", int(bt_summary.get("skipped_rebalances", 0)))
 
                 skipped_rebalances = int(bt_summary.get("skipped_rebalances", 0) or 0)
                 if skipped_rebalances > 0:
@@ -2008,7 +2010,23 @@ with backtest_tab:
                                 st.metric("초과수익", f"{alpha * 100:.2f}%")
                 bt_log = bt_result.get("rebalance_log", pd.DataFrame())
                 if isinstance(bt_log, pd.DataFrame) and not bt_log.empty:
-                    st.dataframe(bt_log[["signal_date", "exec_date", "selected_count", "selected_tickers", "turnover_notional", "costs"]], width="stretch", hide_index=True)
+                    preferred_cols = [
+                        "signal_date",
+                        "exec_date",
+                        "selected_count",
+                        "selected_tickers",
+                        "turnover_notional",
+                        "costs",
+                        "skipped",
+                        "skip_reason",
+                    ]
+                    visible_cols = [col for col in preferred_cols if col in bt_log.columns]
+                    st.dataframe(bt_log[visible_cols], width="stretch", hide_index=True)
+
+                    if "diagnostics" in bt_log.columns:
+                        with st.expander("리밸런싱 진단 로그 보기"):
+                            diag_cols = [col for col in ["signal_date", "exec_date", "diagnostics"] if col in bt_log.columns]
+                            st.dataframe(bt_log[diag_cols], width="stretch", hide_index=True)
 
 filtered = base.copy()
 missing_tickers: list[str] = []
