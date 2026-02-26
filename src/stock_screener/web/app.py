@@ -297,6 +297,7 @@ NEAR_LOW_BUCKETS: dict[str, tuple[float | None, float | None]] = {
 }
 FOREIGN_BUY_METRICS: dict[str, tuple[str, str]] = {
     "foreign_net_buy_value_20d": ("외국인 순매수 20일 누적금액", "원"),
+    "foreign_net_buy_volume_20d": ("외국인 순매 20일 누적수량", "주"),
 }
 
 
@@ -1674,10 +1675,18 @@ with technical_tab:
     )
 
     st.markdown("##### 외국인")
-    st.caption("외국인 스크리너는 외국인 순매수 20일 누적금액(foreign_net_buy_value_20d) 기준으로 동작합니다.")
-    st.session_state.foreign_buy_metric = "foreign_net_buy_value_20d"
+    foreign_buy_metric = st.selectbox(
+        "외국인 기준",
+        list(FOREIGN_BUY_METRICS.keys()),
+        key="foreign_buy_metric",
+        format_func=lambda key: f"{FOREIGN_BUY_METRICS.get(key, (key, ''))[0]} ({key})",
+    )
+    foreign_buy_metric_name, foreign_buy_metric_unit = FOREIGN_BUY_METRICS.get(
+        foreign_buy_metric,
+        FOREIGN_BUY_METRICS["foreign_net_buy_value_20d"],
+    )
     _render_technical_range_filter(
-        title="외국인 순매수 20일 누적금액",
+        title=foreign_buy_metric_name,
         mode_key="foreign_buy_filter_mode",
         mode_options=FOREIGN_BUY_MODES,
         bucket_key="foreign_buy_bucket",
@@ -1686,8 +1695,8 @@ with technical_tab:
         max_key="foreign_buy_max_custom",
         step=1000000.0,
         number_format="%.0f",
-        help_text="단위: 원",
-        row_disabled=not technical_metric_availability.get("foreign_net_buy_value_20d", False),
+        help_text=f"단위: {foreign_buy_metric_unit}",
+        row_disabled=not technical_metric_availability.get(foreign_buy_metric, False),
     )
 
 
@@ -1903,10 +1912,11 @@ if technical_metric_availability["volatility_20d"]:
         min_custom=st.session_state.get("volatility_min_custom", 0.0),
         max_custom=st.session_state.get("volatility_max_custom", 0.0),
     )
-if technical_metric_availability.get("foreign_net_buy_value_20d", False):
+selected_foreign_buy_metric = st.session_state.get("foreign_buy_metric", "foreign_net_buy_value_20d")
+if technical_metric_availability.get(selected_foreign_buy_metric, False):
     filtered = _apply_range_mode_filter(
         filtered,
-        col="foreign_net_buy_value_20d",
+        col=selected_foreign_buy_metric,
         mode=st.session_state.get("foreign_buy_filter_mode", "Any"),
         bucket=st.session_state.get("foreign_buy_bucket", "전체"),
         bucket_map=FOREIGN_BUY_BUCKETS,
@@ -2036,8 +2046,13 @@ if st.session_state.get("volatility_filter_mode") != "Any":
         f"변동성(20D) {_format_range_summary(st.session_state.get('volatility_filter_mode', 'Any'), st.session_state.get('volatility_bucket', '전체'), st.session_state.get('volatility_min_custom', 0.0), st.session_state.get('volatility_max_custom', 0.0))}"
     )
 if st.session_state.get("foreign_buy_filter_mode") != "Any":
+    foreign_buy_metric = st.session_state.get("foreign_buy_metric", "foreign_net_buy_value_20d")
+    foreign_buy_metric_name = FOREIGN_BUY_METRICS.get(
+        foreign_buy_metric,
+        FOREIGN_BUY_METRICS["foreign_net_buy_value_20d"],
+    )[0]
     condition_summaries.append(
-        f"외국인 순매수 20D 누적금액 {_format_range_summary(st.session_state.get('foreign_buy_filter_mode', 'Any'), st.session_state.get('foreign_buy_bucket', '전체'), st.session_state.get('foreign_buy_min_custom', 0.0), st.session_state.get('foreign_buy_max_custom', 0.0))}"
+        f"{foreign_buy_metric_name} {_format_range_summary(st.session_state.get('foreign_buy_filter_mode', 'Any'), st.session_state.get('foreign_buy_bucket', '전체'), st.session_state.get('foreign_buy_min_custom', 0.0), st.session_state.get('foreign_buy_max_custom', 0.0))}"
     )
 if st.session_state.get("apply_eps_qoq"):
     condition_summaries.append(f"EPS Q/Q ≥ {st.session_state.get('eps_qoq_min', 0):.2f}")
