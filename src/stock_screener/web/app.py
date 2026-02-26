@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import streamlit as st
+import pandas as pd
 
 from stock_screener.pipelines.daily_batch import BatchCancelledError, DailyBatchPipeline
 from stock_screener.storage.db import init_db
