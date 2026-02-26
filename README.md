@@ -72,6 +72,15 @@ python -m stock_screener.cli --db-path data/screener.db
 python -m stock_screener.backtest.cli --db-path data/screener.db --config config/backtest_example.yaml
 ```
 
+리밸런싱 주기 값(`run.rebalance`)은 아래 alias를 지원합니다.
+- `W` / `WEEKLY` / `WEEK`: 주간
+- `M` / `MONTHLY` / `MONTH`: 월간
+- `Y` / `YEARLY` / `YEAR`: 연간
+
+Streamlit Backtest 탭에서도 `리밸런싱` 선택지는 `W / M / Y`를 제공합니다.
+
+> 참고: 백테스트 시작 직후에도 진행바가 멈춘 것처럼 보이지 않도록 UI 진행바는 소폭의 초기값/하한을 사용해 표시합니다. 실제 진행률 계산은 엔진의 `processed/total` 이벤트를 기준으로 합니다.
+
 옵션 예시:
 ```bash
 python -m stock_screener.backtest.cli \

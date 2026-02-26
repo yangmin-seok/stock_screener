@@ -34,6 +34,14 @@
 - Explicitly verify query/session key backward compatibility when filter/state keys are changed.
 - If snapshot schema/columns changed, confirm DB migration path (`init_db`/`_ensure_column`) before merge.
 
+
+## Backtest/UI operation notes (2026-02)
+- Backtest tab rebalance selector supports `W / M / Y` (weekly/monthly/yearly).
+- If users report the backtest gauge looks frozen at the beginning, verify UI progress rendering first:
+  - progress bar now reserves a small visible baseline in early stages (including `total=0` events),
+  - then maps engine `processed/total` updates to the visible range until completion.
+- This is a display smoothing change only; execution order/cancellation semantics are unchanged.
+
 ## Fundamental handoff notes (2026-02)
 
 ### Current status
