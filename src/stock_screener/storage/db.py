@@ -250,11 +250,16 @@ CREATE TABLE IF NOT EXISTS financial_quality_daily (
 );
 
 CREATE INDEX IF NOT EXISTS idx_prices_ticker_date ON prices_daily(ticker, date);
+CREATE INDEX IF NOT EXISTS idx_prices_date_ticker ON prices_daily(date, ticker);
 CREATE INDEX IF NOT EXISTS idx_cap_ticker_date ON cap_daily(ticker, date);
+CREATE INDEX IF NOT EXISTS idx_cap_date_ticker ON cap_daily(date, ticker);
 CREATE INDEX IF NOT EXISTS idx_fund_ticker_date ON fundamental_daily(ticker, date);
+CREATE INDEX IF NOT EXISTS idx_fund_date_ticker ON fundamental_daily(date, ticker);
 CREATE INDEX IF NOT EXISTS idx_fin_ticker_date ON financials_daily(ticker, date);
 CREATE INDEX IF NOT EXISTS idx_investor_flow_ticker_date ON investor_flow_daily(ticker, date);
+CREATE INDEX IF NOT EXISTS idx_flow_date_ticker ON investor_flow_daily(date, ticker);
 CREATE INDEX IF NOT EXISTS idx_fin_periodic_ticker_period ON financials_periodic(ticker, fiscal_period);
+CREATE INDEX IF NOT EXISTS idx_fin_periodic_ticker_reported ON financials_periodic(ticker, reported_date);
 CREATE INDEX IF NOT EXISTS idx_snapshot_asof ON snapshot_metrics(asof_date);
 CREATE INDEX IF NOT EXISTS idx_fin_quality_asof_scope ON financial_quality_daily(asof_date, metric_scope);
 """
@@ -360,10 +365,25 @@ def init_db(db_path: str | Path) -> None:
             "CREATE INDEX IF NOT EXISTS idx_fin_periodic_ticker_period ON financials_periodic(ticker, fiscal_period)"
         )
         conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_fin_periodic_ticker_reported ON financials_periodic(ticker, reported_date)"
+        )
+        conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_fin_quality_asof_scope ON financial_quality_daily(asof_date, metric_scope)"
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_investor_flow_ticker_date ON investor_flow_daily(ticker, date)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_prices_date_ticker ON prices_daily(date, ticker)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_flow_date_ticker ON investor_flow_daily(date, ticker)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_fund_date_ticker ON fundamental_daily(date, ticker)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cap_date_ticker ON cap_daily(date, ticker)"
         )
         conn.commit()
 
