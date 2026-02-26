@@ -714,6 +714,11 @@ class Repository:
             row = conn.execute("SELECT MAX(date) AS d FROM prices_daily").fetchone()
         return row[0] if row and row[0] else None
 
+    def get_earliest_price_date(self) -> str | None:
+        with db_session(self.db_path) as conn:
+            row = conn.execute("SELECT MIN(date) AS d FROM prices_daily").fetchone()
+        return row[0] if row and row[0] else None
+
     def count_active_tickers(self) -> int:
         with db_session(self.db_path) as conn:
             row = conn.execute("SELECT COUNT(*) FROM ticker_master WHERE active_flag = 1").fetchone()
