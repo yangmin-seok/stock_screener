@@ -267,12 +267,19 @@ VOLATILITY_BUCKETS: dict[str, tuple[float | None, float | None]] = {
     "40%~60%": (0.4, 0.6),
     "60% 이상": (0.6, None),
 }
-FOREIGN_BUY_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+FOREIGN_BUY_VALUE_BUCKETS: dict[str, tuple[float | None, float | None]] = {
     "전체": (None, None),
     "-100억 이하": (None, -10_000_000_000),
     "-100억~0": (-10_000_000_000, 0.0),
     "0~100억": (0.0, 10_000_000_000),
     "100억 이상": (10_000_000_000, None),
+}
+FOREIGN_BUY_VOLUME_BUCKETS: dict[str, tuple[float | None, float | None]] = {
+    "전체": (None, None),
+    "-100만주 이하": (None, -1_000_000.0),
+    "-100만주~0": (-1_000_000.0, 0.0),
+    "0~100만주": (0.0, 1_000_000.0),
+    "100만주 이상": (1_000_000.0, None),
 }
 DIST_SMA_BUCKETS: dict[str, tuple[float | None, float | None]] = {
     "전체": (None, None),
@@ -298,6 +305,20 @@ NEAR_LOW_BUCKETS: dict[str, tuple[float | None, float | None]] = {
 FOREIGN_BUY_METRICS: dict[str, tuple[str, str]] = {
     "foreign_net_buy_value_20d": ("외국인 순매수 20일 누적금액", "원"),
     "foreign_net_buy_volume_20d": ("외국인 순매 20일 누적수량", "주"),
+}
+FOREIGN_BUY_METRIC_CONFIGS: dict[str, dict[str, Any]] = {
+    "foreign_net_buy_value_20d": {
+        "bucket_options": FOREIGN_BUY_VALUE_BUCKETS,
+        "step": 1_000_000.0,
+        "number_format": "%.0f",
+        "help_text": "금액(원)",
+    },
+    "foreign_net_buy_volume_20d": {
+        "bucket_options": FOREIGN_BUY_VOLUME_BUCKETS,
+        "step": 1_000.0,
+        "number_format": "%.0f",
+        "help_text": "수량(주)",
+    },
 }
 
 
@@ -971,7 +992,12 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("volatility_bucket") not in VOLATILITY_BUCKETS:
         st.session_state.volatility_bucket = "전체"
         st.session_state.query_parse_errors.append("volatility_bucket")
-    if st.session_state.get("foreign_buy_bucket") not in FOREIGN_BUY_BUCKETS:
+    foreign_buy_metric_for_bucket = st.session_state.get("foreign_buy_metric", "foreign_net_buy_value_20d")
+    foreign_buy_bucket_options = FOREIGN_BUY_METRIC_CONFIGS.get(
+        foreign_buy_metric_for_bucket,
+        FOREIGN_BUY_METRIC_CONFIGS["foreign_net_buy_value_20d"],
+    )["bucket_options"]
+    if st.session_state.get("foreign_buy_bucket") not in foreign_buy_bucket_options:
         st.session_state.foreign_buy_bucket = "전체"
         st.session_state.query_parse_errors.append("foreign_buy_bucket")
     if st.session_state.get("dist_sma20_bucket") not in DIST_SMA_BUCKETS:
@@ -1065,7 +1091,12 @@ if st.session_state.get("chg_open_bucket") not in CHG_OPEN_BUCKETS:
     st.session_state.chg_open_bucket = "전체"
 if st.session_state.get("volatility_bucket") not in VOLATILITY_BUCKETS:
     st.session_state.volatility_bucket = "전체"
-if st.session_state.get("foreign_buy_bucket") not in FOREIGN_BUY_BUCKETS:
+foreign_buy_metric_for_bucket = st.session_state.get("foreign_buy_metric", "foreign_net_buy_value_20d")
+foreign_buy_bucket_options = FOREIGN_BUY_METRIC_CONFIGS.get(
+    foreign_buy_metric_for_bucket,
+    FOREIGN_BUY_METRIC_CONFIGS["foreign_net_buy_value_20d"],
+)["bucket_options"]
+if st.session_state.get("foreign_buy_bucket") not in foreign_buy_bucket_options:
     st.session_state.foreign_buy_bucket = "전체"
 if st.session_state.get("dist_sma20_bucket") not in DIST_SMA_BUCKETS:
     st.session_state.dist_sma20_bucket = "전체"
@@ -1685,17 +1716,21 @@ with technical_tab:
         foreign_buy_metric,
         FOREIGN_BUY_METRICS["foreign_net_buy_value_20d"],
     )
+    foreign_buy_metric_config = FOREIGN_BUY_METRIC_CONFIGS.get(
+        foreign_buy_metric,
+        FOREIGN_BUY_METRIC_CONFIGS["foreign_net_buy_value_20d"],
+    )
     _render_technical_range_filter(
         title=foreign_buy_metric_name,
         mode_key="foreign_buy_filter_mode",
         mode_options=FOREIGN_BUY_MODES,
         bucket_key="foreign_buy_bucket",
-        bucket_options=FOREIGN_BUY_BUCKETS,
+        bucket_options=foreign_buy_metric_config["bucket_options"],
         min_key="foreign_buy_min_custom",
         max_key="foreign_buy_max_custom",
-        step=1000000.0,
-        number_format="%.0f",
-        help_text=f"단위: {foreign_buy_metric_unit}",
+        step=foreign_buy_metric_config["step"],
+        number_format=foreign_buy_metric_config["number_format"],
+        help_text=foreign_buy_metric_config["help_text"],
         row_disabled=not technical_metric_availability.get(foreign_buy_metric, False),
     )
 
@@ -1912,14 +1947,17 @@ if technical_metric_availability["volatility_20d"]:
         min_custom=st.session_state.get("volatility_min_custom", 0.0),
         max_custom=st.session_state.get("volatility_max_custom", 0.0),
     )
-selected_foreign_buy_metric = st.session_state.get("foreign_buy_metric", "foreign_net_buy_value_20d")
-if technical_metric_availability.get(selected_foreign_buy_metric, False):
+selected_foreign_metric = st.session_state.get("foreign_buy_metric", "foreign_net_buy_value_20d")
+if technical_metric_availability.get(selected_foreign_metric, False):
     filtered = _apply_range_mode_filter(
         filtered,
-        col=selected_foreign_buy_metric,
+        col=selected_foreign_metric,
         mode=st.session_state.get("foreign_buy_filter_mode", "Any"),
         bucket=st.session_state.get("foreign_buy_bucket", "전체"),
-        bucket_map=FOREIGN_BUY_BUCKETS,
+        bucket_map=FOREIGN_BUY_METRIC_CONFIGS.get(
+            selected_foreign_metric,
+            FOREIGN_BUY_METRIC_CONFIGS["foreign_net_buy_value_20d"],
+        )["bucket_options"],
         min_custom=st.session_state.get("foreign_buy_min_custom", 0.0),
         max_custom=st.session_state.get("foreign_buy_max_custom", 0.0),
     )
@@ -2047,12 +2085,12 @@ if st.session_state.get("volatility_filter_mode") != "Any":
     )
 if st.session_state.get("foreign_buy_filter_mode") != "Any":
     foreign_buy_metric = st.session_state.get("foreign_buy_metric", "foreign_net_buy_value_20d")
-    foreign_buy_metric_name = FOREIGN_BUY_METRICS.get(
+    foreign_buy_metric_name, foreign_buy_metric_unit = FOREIGN_BUY_METRICS.get(
         foreign_buy_metric,
         FOREIGN_BUY_METRICS["foreign_net_buy_value_20d"],
-    )[0]
+    )
     condition_summaries.append(
-        f"{foreign_buy_metric_name} {_format_range_summary(st.session_state.get('foreign_buy_filter_mode', 'Any'), st.session_state.get('foreign_buy_bucket', '전체'), st.session_state.get('foreign_buy_min_custom', 0.0), st.session_state.get('foreign_buy_max_custom', 0.0))}"
+        f"{foreign_buy_metric_name}({foreign_buy_metric_unit}) {_format_range_summary(st.session_state.get('foreign_buy_filter_mode', 'Any'), st.session_state.get('foreign_buy_bucket', '전체'), st.session_state.get('foreign_buy_min_custom', 0.0), st.session_state.get('foreign_buy_max_custom', 0.0))}"
     )
 if st.session_state.get("apply_eps_qoq"):
     condition_summaries.append(f"EPS Q/Q ≥ {st.session_state.get('eps_qoq_min', 0):.2f}")
