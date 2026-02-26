@@ -771,10 +771,13 @@ def _apply_range_mode_filter(
     bucket_map: dict[str, tuple[float | None, float | None]],
     min_custom: float,
     max_custom: float,
+    exclude_zero: bool = False,
 ):
     if mode == "Any":
         return frame
     scoped = frame[frame[col].notna()]
+    if exclude_zero:
+        scoped = scoped[scoped[col] != 0]
     if mode == "구간 선택":
         lower, upper = bucket_map.get(bucket, (None, None))
         if lower is not None:
@@ -2027,6 +2030,7 @@ if technical_metric_availability.get(selected_foreign_metric, False):
         )["bucket_options"],
         min_custom=st.session_state.get("foreign_buy_min_custom", 0.0),
         max_custom=st.session_state.get("foreign_buy_max_custom", 0.0),
+        exclude_zero=True,
     )
 if apply_eps_cagr_5y:
     filtered = filtered[(filtered["eps_cagr_5y"].notna()) & (filtered["eps_cagr_5y"] >= eps_cagr_5y_min)]
