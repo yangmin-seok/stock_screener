@@ -12,6 +12,9 @@ from stock_screener.collectors.fundamental_provider import FundamentalProviderCo
 
 
 logger = logging.getLogger(__name__)
+# pykrx 내부 예외 래퍼가 logging.info(args, kwargs)를 호출해 Python 3.13에서
+# 추가 Logging error(TypeError)를 유발할 수 있어 해당 로거의 INFO 노출을 억제한다.
+logging.getLogger("pykrx.website.comm.util").setLevel(logging.WARNING)
 
 
 @dataclass
@@ -165,13 +168,17 @@ class PykrxCollector:
     def foreign_investor_flow(self, dt: date) -> pd.DataFrame:
         frames: list[pd.DataFrame] = []
         for market in ("KOSPI", "KOSDAQ"):
-            raw = self._retry(
-                stock.get_market_net_purchases_of_equities_by_ticker,
-                self.fmt(dt),
-                self.fmt(dt),
-                market,
-                "외국인",
-            )
+            try:
+                raw = self._retry(
+                    stock.get_market_net_purchases_of_equities_by_ticker,
+                    self.fmt(dt),
+                    self.fmt(dt),
+                    market,
+                    "외국인",
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Foreign investor flow collection failed: date=%s, market=%s, error=%s", dt, market, exc)
+                continue
             if raw.empty:
                 continue
             normalized = self._normalize_foreign_investor_flow(raw, dt)
