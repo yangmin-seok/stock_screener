@@ -1817,7 +1817,9 @@ with backtest_tab:
         if len(trading_dates) < 2:
             st.warning("백테스트를 위한 거래일 데이터가 부족합니다. 먼저 수집을 실행하세요.")
         else:
-            default_start_idx = max(0, len(trading_dates) - 252)
+            end_ts = pd.Timestamp(trading_dates[-1])
+            nine_years_ago = end_ts - pd.DateOffset(years=9)
+            default_start_idx = next((idx for idx, dt in enumerate(trading_dates) if pd.Timestamp(dt) >= nine_years_ago), 0)
             bt_col1, bt_col2, bt_col3 = st.columns(3)
             with bt_col1:
                 bt_start = st.selectbox("시작일", trading_dates, index=default_start_idx, key="bt_start")
@@ -1830,11 +1832,32 @@ with backtest_tab:
             with fg_col1:
                 bt_foreign_enabled = st.checkbox("외국인 누적금액 필터 사용", value=True, key="bt_foreign_enabled")
             with fg_col2:
-                bt_foreign_min = st.number_input("외국인 20D 누적금액 최소", value=0.0, step=100000000.0, key="bt_foreign_min")
+                bt_foreign_min_eok = st.number_input(
+                    "외국인 20D 누적금액 최소(억원)",
+                    min_value=0.0,
+                    value=100.0,
+                    step=50.0,
+                    format="%.0f",
+                    key="bt_foreign_min_eok",
+                    help="예: 1000 = 1,000억원 (KRW 100,000,000,000)",
+                )
             with fg_col3:
-                bt_foreign_window = st.number_input("누적 윈도우(거래일)", min_value=1, value=20, step=1, key="bt_foreign_window")
+                bt_foreign_window = st.number_input(
+                    "누적 윈도우(거래일)",
+                    min_value=1,
+                    value=20,
+                    step=1,
+                    key="bt_foreign_window",
+                    help="최근 N 거래일의 외국인 순매수 금액을 합산해 필터/정렬 기준으로 사용합니다.",
+                )
             with fg_col4:
                 bt_cap_n = st.number_input("상위 N (cap_n)", min_value=1, value=20, step=1, key="bt_cap_n")
+
+            bt_foreign_min_won = float(bt_foreign_min_eok) * 100_000_000.0
+            st.caption(
+                f"외국인 최소 기준: {bt_foreign_min_eok:,.0f}억원 (약 {bt_foreign_min_won:,.0f}원) · "
+                f"누적 윈도우 {int(bt_foreign_window)}거래일"
+            )
 
             cs_col1, cs_col2, cs_col3 = st.columns(3)
             with cs_col1:
@@ -1857,7 +1880,7 @@ with backtest_tab:
                             "enabled": True,
                             "field": "foreign_cum",
                             "op": "gte",
-                            "value": float(bt_foreign_min),
+                            "value": float(bt_foreign_min_won),
                             "unit": "value",
                             "normalize": "none",
                             "missing_policy": "drop",
