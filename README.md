@@ -66,6 +66,29 @@ PYTHONPATH=src streamlit run src/stock_screener/web/app.py
 python -m stock_screener.cli --db-path data/screener.db
 ```
 
+
+## Backtest 실행
+```bash
+python -m stock_screener.backtest.cli --db-path data/screener.db --config config/backtest_example.yaml
+```
+
+옵션 예시:
+```bash
+python -m stock_screener.backtest.cli \
+  --db-path data/screener.db \
+  --config config/backtest_example.yaml \
+  --out-dir runs/backtests \
+  --save-trades --save-positions --save-daily --verbose
+```
+
+산출물 폴더(`runs/backtests/{run_name}_{timestamp}`):
+- `config_used.yaml`
+- `equity_curve.csv`
+- `rebalance_log.csv`
+- `positions.csv` (옵션)
+- `trades.csv` (옵션)
+- `summary.json`
+
 ## 수집 현황 확인
 - 최근 `daily_batch:*` 실행의 청크별 성공/실패, `row_count`, 품질 지표(`eps_non_null`, `bps_non_null`, `revenue_non_null`)를 확인할 수 있습니다.
 - 가능하면 message 내 분모(`metric_total` 또는 `metric=x/y`)를 사용하고, 분모가 없으면 `row_count`를 분모로 사용해 비율을 계산합니다.
