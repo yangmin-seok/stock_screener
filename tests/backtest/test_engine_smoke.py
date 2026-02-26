@@ -286,3 +286,18 @@ def test_engine_run_log_records_skip_when_no_exec_date():
     assert run_log.iloc[0]["status"] == "skipped"
     assert run_log.iloc[0]["stage"] == "schedule"
     assert run_log.iloc[0]["message"] == "no_next_trading_day"
+
+
+def test_engine_progress_callback_emits_done_event_and_summary_timing():
+    repo = FakeRepo()
+    events: list[dict[str, object]] = []
+
+    def _cb(evt: dict[str, object]) -> None:
+        events.append(evt)
+
+    result = run_backtest(_cfg(), repo, progress_callback=_cb)
+
+    assert events
+    assert events[-1].get("stage") == "done"
+    assert float(result["summary"].get("elapsed_seconds", 0.0)) >= 0.0
+    assert int(result["summary"].get("signals_total", 0)) >= 1

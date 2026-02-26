@@ -1920,12 +1920,33 @@ with backtest_tab:
                         costs={"fee_bps": float(bt_fee_bps), "slippage_bps": float(bt_slippage_bps)},
                         output={},
                     )
-                    st.session_state.backtest_result = run_backtest(cfg, repo)
+
+                    progress_text = st.empty()
+                    progress_bar = st.progress(0.0)
+
+                    def _on_backtest_progress(evt: dict[str, Any]) -> None:
+                        processed = int(evt.get("processed", 0) or 0)
+                        total = int(evt.get("total", 0) or 0)
+                        eta_seconds = float(evt.get("eta_seconds", 0.0) or 0.0)
+                        stage = str(evt.get("stage", ""))
+                        message = str(evt.get("message", ""))
+                        ratio = (processed / total) if total > 0 else 0.0
+                        progress_bar.progress(min(max(ratio, 0.0), 1.0))
+                        if total > 0:
+                            progress_text.info(
+                                f"백테스트 진행중: {processed}/{total} · 단계={stage} · 예상 잔여 {eta_seconds:,.1f}초 · {message}"
+                            )
+                        else:
+                            progress_text.info(f"백테스트 진행중: 단계={stage} · {message}")
+
+                    st.session_state.backtest_result = run_backtest(cfg, repo, progress_callback=_on_backtest_progress)
+                    progress_bar.progress(1.0)
+                    progress_text.success("백테스트가 완료되었습니다.")
 
             bt_result = st.session_state.get("backtest_result")
             if bt_result:
                 bt_summary = bt_result.get("summary", {})
-                k1, k2, k3, k4 = st.columns(4)
+                k1, k2, k3, k4, k5 = st.columns(5)
                 with k1:
                     st.metric("최종 자산", f"{float(bt_summary.get('final_equity', 0.0)):,.0f}")
                 with k2:
@@ -1934,6 +1955,8 @@ with backtest_tab:
                     st.metric("총 비용", f"{float(bt_summary.get('total_costs', 0.0)):,.0f}")
                 with k4:
                     st.metric("스킵 횟수", int(bt_summary.get("skipped_rebalances", 0)))
+                with k5:
+                    st.metric("소요시간(초)", f"{float(bt_summary.get('elapsed_seconds', 0.0)):.1f}")
 
                 skipped_rebalances = int(bt_summary.get("skipped_rebalances", 0) or 0)
                 if skipped_rebalances > 0:
