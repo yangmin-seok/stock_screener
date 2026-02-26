@@ -205,3 +205,40 @@ def test_engine_monthly_equity_curve_contains_intermediate_trading_days():
     assert len(equity_dates) > len(rebalance_exec_dates)
     assert "2025-02-04" in equity_dates
     assert "2025-02-04" not in rebalance_exec_dates
+
+
+def test_engine_counts_skipped_rebalance_when_signal_is_last_trading_day():
+    repo = FakeRepo()
+    config = BacktestConfig(
+        run={
+            "name": "skip-last-day",
+            "start_date": "2025-01-02",
+            "end_date": "2025-01-15",
+            "rebalance": "M",
+            "initial_capital": 1_000_000,
+        },
+        universe={},
+        filters={},
+        selection={
+            "mode": "cap_n",
+            "cap_n": 1,
+            "sort_by": "foreign_cum_value_20d",
+            "sort_direction": "desc",
+            "empty_selection_policy": "cash",
+        },
+        portfolio={"weighting": "equal"},
+        costs={"fee_bps": 0.0, "slippage_bps": 0.0},
+        output={},
+    )
+
+    result = run_backtest(config, repo)
+
+    assert result["summary"]["rebalances"] == 0
+    assert result["summary"]["skipped_rebalances"] == 1
+    assert result["summary"]["skipped_rebalance_reasons"] == {"no_next_trading_day": 1}
+
+    rebalance_log = result["rebalance_log"]
+    assert len(rebalance_log) == 1
+    assert bool(rebalance_log.iloc[0]["skipped"])
+    assert rebalance_log.iloc[0]["signal_date"] == "2025-01-15"
+    assert rebalance_log.iloc[0]["skip_reason"] == "no_next_trading_day"
