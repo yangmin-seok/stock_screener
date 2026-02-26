@@ -470,12 +470,15 @@ class Repository:
                    p.close,
                    p.volume,
                    COALESCE(c.value, p.value) AS value,
+                   flow.foreign_net_buy_volume,
+                   flow.foreign_net_buy_value,
                    ROW_NUMBER() OVER (PARTITION BY p.ticker ORDER BY p.date DESC) AS rn
             FROM prices_daily p
             LEFT JOIN cap_daily c ON c.date = p.date AND c.ticker = p.ticker
+            LEFT JOIN investor_flow_daily flow ON flow.date = p.date AND flow.ticker = p.ticker
             WHERE p.date <= ?
         )
-        SELECT date, ticker, open, high, low, close, volume, value
+        SELECT date, ticker, open, high, low, close, volume, value, foreign_net_buy_volume, foreign_net_buy_value
         FROM ranked
         WHERE rn <= ?
         ORDER BY ticker, date
