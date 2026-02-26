@@ -1827,7 +1827,7 @@ with backtest_tab:
             with bt_col2:
                 bt_end = st.selectbox("종료일", trading_dates, index=len(trading_dates) - 1, key="bt_end")
             with bt_col3:
-                bt_rebalance = st.selectbox("리밸런싱", ["W", "M"], index=1, key="bt_rebalance")
+                bt_rebalance = st.selectbox("리밸런싱", ["W", "M", "Y"], index=1, key="bt_rebalance")
             with bt_col4:
                 bt_benchmark_ticker = st.text_input(
                     "벤치마크(티커 또는 KOSPI)",
@@ -1922,7 +1922,7 @@ with backtest_tab:
                     )
 
                     progress_text = st.empty()
-                    progress_bar = st.progress(0.0)
+                    progress_bar = st.progress(0.02)
 
                     def _on_backtest_progress(evt: dict[str, Any]) -> None:
                         processed = int(evt.get("processed", 0) or 0)
@@ -1930,8 +1930,13 @@ with backtest_tab:
                         eta_seconds = float(evt.get("eta_seconds", 0.0) or 0.0)
                         stage = str(evt.get("stage", ""))
                         message = str(evt.get("message", ""))
-                        ratio = (processed / total) if total > 0 else 0.0
-                        progress_bar.progress(min(max(ratio, 0.0), 1.0))
+                        if total > 0:
+                            ratio = min(max(processed / total, 0.0), 1.0)
+                            # 진행 시작 직후(예: 사전 로딩)에도 게이지가 정지된 것처럼 보이지 않도록 하단 5%를 예약한다.
+                            display_ratio = 0.05 + (ratio * 0.95)
+                        else:
+                            display_ratio = 0.05 if stage != "done" else 1.0
+                        progress_bar.progress(min(max(display_ratio, 0.0), 1.0))
                         if total > 0:
                             progress_text.info(
                                 f"백테스트 진행중: {processed}/{total} · 단계={stage} · 예상 잔여 {eta_seconds:,.1f}초 · {message}"
