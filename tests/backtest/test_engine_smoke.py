@@ -242,3 +242,47 @@ def test_engine_counts_skipped_rebalance_when_signal_is_last_trading_day():
     assert bool(rebalance_log.iloc[0]["skipped"])
     assert rebalance_log.iloc[0]["signal_date"] == "2025-01-15"
     assert rebalance_log.iloc[0]["skip_reason"] == "no_next_trading_day"
+
+
+def test_engine_exposes_run_log_with_selection_and_rebalance_steps():
+    repo = FakeRepo()
+    result = run_backtest(_cfg(), repo)
+
+    run_log = result["run_log"]
+    assert isinstance(run_log, pd.DataFrame)
+    assert not run_log.empty
+    assert {"stage", "status", "universe_count", "filtered_count", "selected_count"}.issubset(run_log.columns)
+    assert "selection" in run_log["stage"].tolist()
+    assert "rebalance" in run_log["stage"].tolist()
+
+
+def test_engine_run_log_records_skip_when_no_exec_date():
+    repo = FakeRepo()
+    config = BacktestConfig(
+        run={
+            "name": "skip-last-day-run-log",
+            "start_date": "2025-01-02",
+            "end_date": "2025-01-15",
+            "rebalance": "M",
+            "initial_capital": 1_000_000,
+        },
+        universe={},
+        filters={},
+        selection={
+            "mode": "cap_n",
+            "cap_n": 1,
+            "sort_by": "foreign_cum_value_20d",
+            "sort_direction": "desc",
+            "empty_selection_policy": "cash",
+        },
+        portfolio={"weighting": "equal"},
+        costs={"fee_bps": 0.0, "slippage_bps": 0.0},
+        output={},
+    )
+
+    result = run_backtest(config, repo)
+    run_log = result["run_log"]
+    assert len(run_log) == 1
+    assert run_log.iloc[0]["status"] == "skipped"
+    assert run_log.iloc[0]["stage"] == "schedule"
+    assert run_log.iloc[0]["message"] == "no_next_trading_day"

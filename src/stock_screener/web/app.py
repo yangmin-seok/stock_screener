@@ -2028,6 +2028,22 @@ with backtest_tab:
                             diag_cols = [col for col in ["signal_date", "exec_date", "diagnostics"] if col in bt_log.columns]
                             st.dataframe(bt_log[diag_cols], width="stretch", hide_index=True)
 
+                bt_run_log = bt_result.get("run_log", pd.DataFrame())
+                if isinstance(bt_run_log, pd.DataFrame) and not bt_run_log.empty:
+                    st.markdown("##### 실행 진행 로그")
+                    run_log_cols = [
+                        "signal_date",
+                        "exec_date",
+                        "stage",
+                        "status",
+                        "message",
+                        "universe_count",
+                        "filtered_count",
+                        "selected_count",
+                    ]
+                    visible_run_log_cols = [col for col in run_log_cols if col in bt_run_log.columns]
+                    st.dataframe(bt_run_log[visible_run_log_cols], width="stretch", hide_index=True)
+
 filtered = base.copy()
 missing_tickers: list[str] = []
 if ticker_list:
