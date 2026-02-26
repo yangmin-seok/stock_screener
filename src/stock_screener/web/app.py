@@ -1897,11 +1897,11 @@ elif avg_value_available and value_filter_mode == "직접 입력":
     if value_max_custom > 0:
         filtered = filtered[filtered["avg_value_20d"] <= value_max_custom]
 if apply_pbr_max:
-    filtered = filtered[(filtered["pbr"].notna()) & (filtered["pbr"] <= pbr_max)]
+    filtered = filtered[(filtered["pbr"].notna()) & (filtered["pbr"] > 0) & (filtered["pbr"] <= pbr_max)]
 if apply_reserve_ratio_min:
     filtered = filtered[(filtered["reserve_ratio"].notna()) & (filtered["reserve_ratio"] >= reserve_ratio_min)]
 if apply_roe_min:
-    filtered = filtered[(filtered["roe_proxy"].notna()) & (filtered["roe_proxy"] >= roe_min)]
+    filtered = filtered[(filtered["roe_proxy"].notna()) & (filtered["roe_proxy"] > 0) & (filtered["roe_proxy"] >= roe_min)]
 if apply_eps_positive:
     filtered = filtered[filtered["eps_positive"] == 1]
 if fundamental_metric_availability["ev_ebitda"] and ev_ebitda_filter_mode == "구간 선택":
