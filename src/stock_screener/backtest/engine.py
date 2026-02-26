@@ -46,6 +46,7 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
         return {
             'equity_curve': pd.DataFrame(columns=['date', 'equity_close', 'return']),
             'rebalance_log': pd.DataFrame(columns=['signal_date', 'exec_date', 'selected_count', 'turnover_notional', 'costs', 'skipped', 'skip_reason']),
+            'run_log': pd.DataFrame(columns=['signal_date', 'exec_date', 'stage', 'status', 'message', 'universe_count', 'filtered_count', 'selected_count']),
             'positions': pd.DataFrame(columns=['date', 'ticker', 'weight', 'shares', 'open_price']),
             'trades': pd.DataFrame(columns=['exec_date', 'ticker', 'delta_shares', 'price_open', 'notional', 'cost']),
             'summary': {'rebalances': 0, 'skipped_rebalances': 0, 'skipped_rebalance_reasons': {}, 'final_equity': initial_capital, 'turnover': 0.0, 'number_of_trades': 0, 'total_costs': 0.0},
@@ -63,6 +64,7 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
     rebalance_records: list[dict[str, Any]] = []
     positions_records: list[dict[str, Any]] = []
     trades_records: list[dict[str, Any]] = []
+    run_records: list[dict[str, Any]] = []
     skipped_rebalance_reasons: dict[str, int] = {}
 
     trading_date_to_idx = {dt: idx for idx, dt in enumerate(trading_dates_all)}
@@ -86,11 +88,35 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
                     'skip_reason': reason,
                 }
             )
+            run_records.append(
+                {
+                    'signal_date': signal_date,
+                    'exec_date': None,
+                    'stage': 'schedule',
+                    'status': 'skipped',
+                    'message': reason,
+                    'universe_count': 0,
+                    'filtered_count': 0,
+                    'selected_count': 0,
+                }
+            )
             continue
 
         frame = repo.get_asof_frame(signal_date, foreign_window=int(filters_cfg.get('foreign_window', 20)))
         filtered, diagnostics = apply_filters(frame, filters_cfg)
         selected, selection_meta = select_tickers(filtered, selection_cfg)
+        run_records.append(
+            {
+                'signal_date': signal_date,
+                'exec_date': exec_date,
+                'stage': 'selection',
+                'status': 'ok',
+                'message': f"filters={len(diagnostics)}",
+                'universe_count': int(len(frame)),
+                'filtered_count': int(len(filtered)),
+                'selected_count': int(len(selected)),
+            }
+        )
 
         empty_policy = str(selection_cfg.get('empty_selection_policy', 'cash'))
         if not selected and empty_policy == 'keep_prev':
@@ -127,6 +153,18 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
                     'costs': 0.0,
                     'skipped': True,
                     'skip_reason': reason,
+                }
+            )
+            run_records.append(
+                {
+                    'signal_date': signal_date,
+                    'exec_date': exec_date,
+                    'stage': 'pricing',
+                    'status': 'skipped',
+                    'message': reason,
+                    'universe_count': int(len(frame)),
+                    'filtered_count': int(len(filtered)),
+                    'selected_count': int(len(selected)),
                 }
             )
             continue
@@ -181,6 +219,18 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
                 'skip_reason': None,
             }
         )
+        run_records.append(
+            {
+                'signal_date': signal_date,
+                'exec_date': exec_date,
+                'stage': 'rebalance',
+                'status': 'ok',
+                'message': f"segment_end={segment_end}",
+                'universe_count': int(len(frame)),
+                'filtered_count': int(len(filtered)),
+                'selected_count': int(len(selected)),
+            }
+        )
 
     if not equity_records:
         equity_curve = pd.DataFrame(columns=['date', 'equity_close', 'return'])
@@ -189,6 +239,7 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
         equity_curve['return'] = equity_curve['equity_close'].pct_change().fillna(0.0)
 
     rebalance_log = pd.DataFrame(rebalance_records)
+    run_log = pd.DataFrame(run_records)
     trades = pd.DataFrame(trades_records)
 
     final_equity = float(state.cash) if state.cash is not None else float(initial_capital)
@@ -209,6 +260,7 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
     return {
         'equity_curve': equity_curve,
         'rebalance_log': rebalance_log,
+        'run_log': run_log,
         'positions': pd.DataFrame(positions_records),
         'trades': trades,
         'summary': summary,
