@@ -123,22 +123,24 @@ def build_snapshot(
         g["volatility_20d"] = g["ret_daily"].rolling(VOLATILITY_WINDOW, min_periods=VOLATILITY_WINDOW).std() * np.sqrt(252)
 
         if "foreign_net_buy_volume" in g.columns:
-            volume_series = pd.to_numeric(g["foreign_net_buy_volume"], errors="coerce").fillna(0.0)
+            volume_series = pd.to_numeric(g["foreign_net_buy_volume"], errors="coerce")
             g["foreign_net_buy_volume_20d"] = volume_series.rolling(
                 FOREIGN_NET_BUY_WINDOW,
-                min_periods=1,
+                min_periods=FOREIGN_NET_BUY_WINDOW,
             ).sum()
+            g.loc[volume_series.isna(), "foreign_net_buy_volume_20d"] = np.nan
             g["foreign_net_buy_ratio"] = _safe_ratio(g["foreign_net_buy_volume"], g["foreign_net_buy_volume_20d"])
         else:
             g["foreign_net_buy_volume_20d"] = np.nan
             g["foreign_net_buy_ratio"] = np.nan
 
         if "foreign_net_buy_value" in g.columns:
-            value_series = pd.to_numeric(g["foreign_net_buy_value"], errors="coerce").fillna(0.0)
+            value_series = pd.to_numeric(g["foreign_net_buy_value"], errors="coerce")
             g["foreign_net_buy_value_20d"] = value_series.rolling(
                 FOREIGN_NET_BUY_WINDOW,
-                min_periods=1,
+                min_periods=FOREIGN_NET_BUY_WINDOW,
             ).sum()
+            g.loc[value_series.isna(), "foreign_net_buy_value_20d"] = np.nan
         else:
             g["foreign_net_buy_value_20d"] = np.nan
 
