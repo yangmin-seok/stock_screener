@@ -1933,6 +1933,17 @@ with backtest_tab:
                 with k3:
                     st.metric("총 비용", f"{float(bt_summary.get('total_costs', 0.0)):,.0f}")
 
+                skipped_rebalances = int(bt_summary.get("skipped_rebalances", 0) or 0)
+                if skipped_rebalances > 0:
+                    skipped_reasons = bt_summary.get("skipped_rebalance_reasons", {})
+                    if isinstance(skipped_reasons, dict) and skipped_reasons:
+                        reasons_text = ", ".join(f"{key}: {value}" for key, value in sorted(skipped_reasons.items()))
+                        st.warning(
+                            f"일부 리밸런싱이 실행되지 않았습니다 (총 {skipped_rebalances}회). 사유: {reasons_text}"
+                        )
+                    else:
+                        st.warning(f"일부 리밸런싱이 실행되지 않았습니다 (총 {skipped_rebalances}회).")
+
                 bt_curve = bt_result.get("equity_curve", pd.DataFrame())
                 if isinstance(bt_curve, pd.DataFrame) and not bt_curve.empty:
                     chart_df = bt_curve.copy()
