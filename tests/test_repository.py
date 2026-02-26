@@ -690,3 +690,21 @@ def test_get_price_panel_returns_requested_tickers_and_period(tmp_path):
     assert panel["ticker"].tolist() == ["AAA", "AAA", "BBB"]
     assert panel["date"].tolist() == ["2025-01-02", "2025-01-03", "2025-01-03"]
     assert list(panel.columns) == ["date", "ticker", "open", "close"]
+
+
+def test_upsert_collection_checkpoints_bulk(tmp_path):
+    db = tmp_path / "x.db"
+    init_db(db)
+    repo = Repository(db)
+
+    rows = [
+        {"ticker": "005930", "last_price_date": "2025-01-15", "last_fundamental_date": None},
+        {"ticker": "000660", "last_price_date": None, "last_fundamental_date": "2025-01-10"},
+    ]
+    inserted = repo.upsert_collection_checkpoints_bulk(rows)
+
+    assert inserted == 2
+    cp1 = repo.get_collection_checkpoint("005930")
+    cp2 = repo.get_collection_checkpoint("000660")
+    assert cp1["last_price_date"] == "2025-01-15"
+    assert cp2["last_fundamental_date"] == "2025-01-10"
