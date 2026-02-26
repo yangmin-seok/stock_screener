@@ -1827,7 +1827,7 @@ with backtest_tab:
             with bt_col2:
                 bt_end = st.selectbox("종료일", trading_dates, index=len(trading_dates) - 1, key="bt_end")
             with bt_col3:
-                bt_rebalance = st.selectbox("리밸런싱", ["W", "M"], index=1, key="bt_rebalance")
+                bt_rebalance = st.selectbox("리밸런싱", ["W", "M", "Y"], index=1, key="bt_rebalance")
             with bt_col4:
                 bt_benchmark_ticker = st.text_input(
                     "벤치마크(티커 또는 KOSPI)",
