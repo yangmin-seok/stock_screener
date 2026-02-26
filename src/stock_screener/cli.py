@@ -48,6 +48,8 @@ def main() -> None:
     parser.add_argument("--lookback-days", type=int, default=3650)
     parser.add_argument("--chunk-years", type=int, default=2, help="Fundamental backfill years per chunk")
     parser.add_argument("--chunks", type=int, default=1, help="Number of fundamental backfill chunks")
+    parser.add_argument("--fundamental-anchor-mode", choices=["minimal", "full"], default="full", help="Anchor density for fundamental backfill dates")
+    parser.add_argument("--max-price-workers", type=int, default=6, help="Max workers for parallel OHLCV collection (bounded at 8)")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
     parser.add_argument("--snapshot-only", action="store_true", help="Rebuild snapshot from cached DB data only")
     parser.add_argument("--initial-backfill", action="store_true", help="Run long-window initial backfill")
@@ -106,6 +108,8 @@ def main() -> None:
             initial_backfill=args.initial_backfill,
             chunk_years=args.chunk_years,
             chunks=args.chunks,
+            fundamental_anchor_mode=args.fundamental_anchor_mode,
+            max_price_workers=args.max_price_workers,
         )
         print(result)
 

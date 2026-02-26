@@ -760,6 +760,38 @@ class Repository:
                 (ticker, last_price_date, last_fundamental_date),
             )
 
+
+    def upsert_collection_checkpoints_bulk(
+        self,
+        rows: list[dict[str, str | None]],
+    ) -> int:
+        if not rows:
+            return 0
+        payload = [
+            (
+                str(row["ticker"]),
+                row.get("last_price_date"),
+                row.get("last_fundamental_date"),
+            )
+            for row in rows
+            if row.get("ticker")
+        ]
+        if not payload:
+            return 0
+        with db_session(self.db_path) as conn:
+            conn.executemany(
+                """
+                INSERT INTO collection_checkpoint(ticker, last_price_date, last_fundamental_date, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(ticker) DO UPDATE SET
+                    last_price_date=COALESCE(excluded.last_price_date, collection_checkpoint.last_price_date),
+                    last_fundamental_date=COALESCE(excluded.last_fundamental_date, collection_checkpoint.last_fundamental_date),
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                payload,
+            )
+        return len(payload)
+
     def log_job_stage(
         self,
         *,

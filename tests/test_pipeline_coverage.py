@@ -213,8 +213,8 @@ def test_daily_batch_marks_chunk_cancelled_when_cancel_requested_mid_chunk(monke
 
     def should_cancel() -> bool:
         calls["count"] += 1
-        # price loop(1), cap loop(1), investor-flow loop(1), chunk precheck(1) 이후 fund-loop 체크에서 취소
-        return calls["count"] >= 5
+        # price prepare/result + cap + investor-flow + chunk precheck 이후 fund-loop 체크에서 취소
+        return calls["count"] >= 6
 
     with pytest.raises(BatchCancelledError):
         pipeline.run(
@@ -279,3 +279,40 @@ def test_repository_upsert_investor_flow_roundtrip(tmp_path):
     joined = repo.get_daily_join("2025-01-15")
     assert pd.isna(joined.loc[0, "foreign_net_buy_volume"])
     assert joined.loc[0, "foreign_net_buy_value"] == 12345
+
+
+def test_daily_batch_stage_message_includes_perf_fields(monkeypatch, tmp_path):
+    monkeypatch.setenv("DART_API_KEY", "dummy-key")
+    pipeline = DailyBatchPipeline(tmp_path / "x.db")
+    pipeline.collector = _FakeCollector()
+    monkeypatch.setattr(pipeline, "_collect_financials", lambda dt, **kwargs: pd.DataFrame())
+
+    pipeline.run(
+        asof_date="2025-01-15",
+        lookback_days=5,
+        initial_backfill=False,
+        chunk_years=1,
+        chunks=1,
+        rebuild_snapshot=False,
+    )
+
+    with sqlite3.connect(tmp_path / "x.db") as conn:
+        message = conn.execute(
+            "SELECT message FROM job_log WHERE run_id = ? AND stage = ?",
+            ("daily_batch:2025-01-15", "price_collection"),
+        ).fetchone()[0]
+
+    assert "elapsed_s=" in message
+    assert "api_calls=" in message
+    assert "rows_upserted=" in message
+
+
+def test_fundamental_backfill_dates_minimal_has_fewer_or_equal_anchors():
+    trading_dates = [d.date() for d in pd.bdate_range("2024-01-01", "2024-12-31")]
+    asof = pd.Timestamp("2024-12-31").date()
+
+    full = DailyBatchPipeline._fundamental_backfill_dates(asof, trading_dates, mode="full")
+    minimal = DailyBatchPipeline._fundamental_backfill_dates(asof, trading_dates, mode="minimal")
+
+    assert len(minimal) <= len(full)
+    assert set(minimal).issubset(set(full))

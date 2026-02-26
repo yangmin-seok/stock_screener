@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
@@ -62,22 +61,7 @@ class PykrxCollector:
         return out
 
     def _retry(self, fn, *args, **kwargs):
-        last_error = None
-        for idx in range(self.retries):
-            try:
-                return fn(*args, **kwargs)
-            except Exception as exc:  # noqa: BLE001
-                last_error = exc
-                logger.warning(
-                    "pykrx call failed (attempt %s/%s): fn=%s, error=%s",
-                    idx + 1,
-                    self.retries,
-                    getattr(fn, "__name__", repr(fn)),
-                    exc,
-                )
-                if idx + 1 < self.retries:
-                    time.sleep(self.sleep_seconds * (2**idx))
-        raise RuntimeError(f"pykrx call failed after retries: {last_error}") from last_error
+        return fn(*args, **kwargs)
 
     def recent_business_day(self) -> date:
         candidate = datetime.now().date()
