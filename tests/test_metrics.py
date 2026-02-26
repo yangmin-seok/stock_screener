@@ -198,3 +198,60 @@ def test_build_snapshot_foreign_metrics_default_to_nan_when_input_column_missing
     assert pd.isna(row["foreign_net_buy_volume_20d"])
     assert pd.isna(row["foreign_net_buy_ratio"])
     assert pd.isna(row["foreign_net_buy_value_20d"])
+
+
+def test_build_snapshot_keeps_daily_foreign_columns_from_price_window_when_daily_join_has_nulls():
+    asof_date = "2025-01-31"
+    dates = pd.date_range("2025-01-01", periods=31, freq="D")
+    price_window = pd.DataFrame(
+        {
+            "date": [d.strftime("%Y-%m-%d") for d in dates],
+            "ticker": ["CCC"] * len(dates),
+            "open": [100.0] * len(dates),
+            "high": [102.0] * len(dates),
+            "low": [99.0] * len(dates),
+            "close": [101.0] * len(dates),
+            "volume": [1000] * len(dates),
+            "value": [101000.0] * len(dates),
+            "foreign_net_buy_volume": [10.0] * len(dates),
+            "foreign_net_buy_value": [1000.0] * len(dates),
+        }
+    )
+    # Simulate daily join having same columns but null on asof row.
+    daily = pd.DataFrame(
+        [
+            {
+                "ticker": "CCC",
+                "name": "Gamma",
+                "market": "KOSPI",
+                "mcap": 1_000_000_000,
+                "per": 10.0,
+                "pbr": 1.0,
+                "div": 0.0,
+                "dps": 0.0,
+                "reserve_ratio": 200.0,
+                "eps": 100.0,
+                "bps": 1000.0,
+                "fiscal_period": "2024Q4",
+                "period_type": "quarterly",
+                "reported_date": "2025-01-15",
+                "consolidation_type": "C",
+                "financial_source": "unit",
+                "foreign_net_buy_volume": np.nan,
+                "foreign_net_buy_value": np.nan,
+            }
+        ]
+    )
+
+    snapshot = build_snapshot(
+        price_window=price_window,
+        daily=daily,
+        fund_hist=pd.DataFrame(columns=["ticker", "fiscal_period", "period_type", "consolidation_type", "reported_date"]),
+        asof_date=asof_date,
+    )
+    row = snapshot.iloc[0]
+
+    assert row["foreign_net_buy_volume"] == 10.0
+    assert row["foreign_net_buy_value"] == 1000.0
+    assert row["foreign_net_buy_volume_20d"] == 200.0
+    assert row["foreign_net_buy_value_20d"] == 20_000.0
