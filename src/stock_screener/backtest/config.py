@@ -21,7 +21,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "name": "example_run",
         "start_date": "2021-01-01",
         "end_date": "2021-12-31",
-        "rebalance": "monthly",
+        "rebalance": "monthly",  # weekly/monthly/yearly: W|M|Y aliases supported
     },
     "universe": {
         "market": ["KOSPI", "KOSDAQ"],
