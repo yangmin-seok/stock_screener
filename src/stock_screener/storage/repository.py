@@ -510,7 +510,8 @@ class Repository:
             fallback_rows = conn.execute(fallback_query).fetchall()
         return [str(row[0]) for row in fallback_rows]
 
-    def get_asof_frame(self, dt: str, window: int = 20) -> pd.DataFrame:
+    def get_asof_frame(self, dt: str, window: int = 20, foreign_window: int | None = None) -> pd.DataFrame:
+        foreign_window = window if foreign_window is None else foreign_window
         query = """
         WITH price_ranked AS (
             SELECT
@@ -535,11 +536,10 @@ class Repository:
         rolling AS (
             SELECT
                 ticker,
-                AVG(value) AS avg_value_20d,
-                SUM(foreign_net_buy_volume) AS foreign_cum_volume_20d,
-                SUM(foreign_net_buy_value) AS foreign_cum_value_20d
+                AVG(CASE WHEN rn <= :window THEN value END) AS avg_value_20d,
+                SUM(CASE WHEN rn <= :foreign_window THEN foreign_net_buy_volume END) AS foreign_cum_volume_20d,
+                SUM(CASE WHEN rn <= :foreign_window THEN foreign_net_buy_value END) AS foreign_cum_value_20d
             FROM price_ranked
-            WHERE rn <= :window
             GROUP BY ticker
         ),
         fin_ranked AS (
@@ -597,7 +597,11 @@ class Repository:
         ORDER BY t.ticker
         """
         with db_session(self.db_path) as conn:
-            return pd.read_sql_query(query, conn, params={"dt": dt, "window": window})
+            return pd.read_sql_query(
+                query,
+                conn,
+                params={"dt": dt, "window": window, "foreign_window": foreign_window},
+            )
 
     def get_price_panel(self, tickers: list[str], start_date: str, end_date: str) -> pd.DataFrame:
         if not tickers:
