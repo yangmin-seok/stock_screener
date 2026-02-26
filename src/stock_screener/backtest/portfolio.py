@@ -12,8 +12,8 @@ class PortfolioState:
 
 
 def _price_map(frame: pd.DataFrame, column: str) -> dict[str, float]:
-    valid = frame.dropna(subset=[column])[["ticker", column]]
-    return {str(row["ticker"]): float(row[column]) for _, row in valid.iterrows()}
+    valid = frame.dropna(subset=[column])[['ticker', column]]
+    return {str(row['ticker']): float(row[column]) for _, row in valid.iterrows()}
 
 
 def rebalance_at_open(
@@ -23,8 +23,8 @@ def rebalance_at_open(
     *,
     fee_bps: float = 0.0,
     slippage_bps: float = 0.0,
-) -> dict[str, float]:
-    open_map = _price_map(open_prices, "open")
+) -> dict[str, float | list[dict[str, float | str]]]:
+    open_map = _price_map(open_prices, 'open')
     tradable_targets = {t: w for t, w in target_weights.items() if t in open_map}
 
     if tradable_targets:
@@ -38,6 +38,9 @@ def rebalance_at_open(
     all_tickers = current_tickers | target_tickers
 
     turnover_notional = 0.0
+    staged_shares = dict(state.shares)
+    trade_rows: list[dict[str, float | str]] = []
+
     for ticker in all_tickers:
         px = open_map.get(ticker)
         if px is None or px <= 0:
@@ -47,23 +50,39 @@ def rebalance_at_open(
         target_value = equity_open * tradable_targets.get(ticker, 0.0)
         target_shares = target_value / px
         delta = target_shares - current_shares
-        turnover_notional += abs(delta) * px
-        state.shares[ticker] = target_shares
+        notional = abs(delta) * px
+        turnover_notional += notional
+        staged_shares[ticker] = target_shares
+
+        if abs(delta) > 0:
+            trade_rows.append(
+                {
+                    'ticker': ticker,
+                    'delta_shares': float(delta),
+                    'price_open': float(px),
+                    'notional': float(notional),
+                }
+            )
 
     cost_rate = (fee_bps + slippage_bps) / 10000.0
     costs = turnover_notional * cost_rate
 
-    post_trade_value = sum(state.shares.get(t, 0.0) * px for t, px in open_map.items())
+    for row in trade_rows:
+        row['cost'] = float(row['notional']) * cost_rate
+
+    post_trade_value = sum(staged_shares.get(t, 0.0) * px for t, px in open_map.items())
+    state.shares = staged_shares
     state.cash = equity_open - post_trade_value - costs
 
     return {
-        "equity_open": equity_open,
-        "turnover_notional": turnover_notional,
-        "costs": costs,
+        'equity_open': equity_open,
+        'turnover_notional': turnover_notional,
+        'costs': costs,
+        'trade_rows': trade_rows,
     }
 
 
 def mark_to_market_close(state: PortfolioState, close_prices: pd.DataFrame, date: str) -> dict[str, float | str]:
-    close_map = _price_map(close_prices, "close")
+    close_map = _price_map(close_prices, 'close')
     equity_close = state.cash + sum(state.shares.get(t, 0.0) * px for t, px in close_map.items())
-    return {"date": date, "equity_close": equity_close}
+    return {'date': date, 'equity_close': equity_close}
