@@ -110,6 +110,8 @@ python -m stock_screener.cli --db-path data/screener.db --snapshot-only
 ```bash
 python -m stock_screener.cli --db-path data/screener.db --update-reserve-only --rebuild-snapshot
 ```
+- `--update-reserve-only`(단독/`--rebuild-snapshot` 조합 모두) 실행 시 **유보율(reserve_ratio)만 수집**하며, 외국인 순매수(`investor_flow_daily`) 당일값은 갱신되지 않습니다.
+- 따라서 `--update-reserve-only --rebuild-snapshot` 결과는 "최신 유보율을 반영한 snapshot_metrics 재계산"이며, 외국인 수급 지표는 기존 저장값을 그대로 사용합니다.
 - Streamlit UI에서도 `유보율만 업데이트` 버튼으로 동일 기능을 실행할 수 있습니다.
 
 

@@ -79,6 +79,13 @@ def main() -> None:
         updated_asof, rows = pipeline.update_reserve_ratio_only(asof_date=args.asof_date)
         print(f"reserve_ratio updated: asof={updated_asof}, rows={rows}")
 
+        investor_flow_message = (
+            "ℹ️ --update-reserve-only does not collect investor flow(외국인 순매수) data; "
+            "investor_flow_daily remains unchanged in this run."
+        )
+        logging.info(investor_flow_message)
+        print(investor_flow_message)
+
         if args.rebuild_snapshot:
             snapshot_result = pipeline.rebuild_snapshot_only(asof_date=updated_asof, lookback_days=args.lookback_days)
             print(f"snapshot_metrics rebuilt: asof={snapshot_result.asof_date}, rows={snapshot_result.snapshot}")

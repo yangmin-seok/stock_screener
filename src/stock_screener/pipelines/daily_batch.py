@@ -66,6 +66,11 @@ class DailyBatchPipeline:
         ]
 
     def update_reserve_ratio_only(self, asof_date: str | None = None) -> tuple[str, int]:
+        """Update reserve ratio only.
+
+        This mode only crawls Naver reserve ratio data and leaves
+        ``investor_flow_daily`` untouched.
+        """
         if asof_date:
             dt = pd.to_datetime(asof_date).date()
             asof_str = dt.strftime("%Y-%m-%d")
@@ -82,10 +87,18 @@ class DailyBatchPipeline:
             self.repo.upsert_tickers(tickers_frame)
             tickers = tickers_frame["ticker"].tolist()
 
-        logger.info("Starting reserve ratio update: asof=%s, tickers=%s", asof_str, len(tickers))
+        logger.info(
+            "Starting reserve ratio update: asof=%s, tickers=%s (investor_flow_daily untouched)",
+            asof_str,
+            len(tickers),
+        )
         ratio_frame = self.ratio_collector.latest_reserve_ratio(tickers)
         rows = self.repo.upsert_reserve_ratio(asof_str, ratio_frame)
-        logger.info("Reserve ratio update completed: asof=%s, rows=%s", asof_str, rows)
+        logger.info(
+            "Reserve ratio update completed: asof=%s, rows=%s (investor_flow_daily untouched)",
+            asof_str,
+            rows,
+        )
         return asof_str, rows
 
     @staticmethod
