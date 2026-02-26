@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from stock_screener.backtest.config import load_backtest_config
+from stock_screener.backtest.engine import run_backtest
 from stock_screener.storage.db import init_db
 from stock_screener.storage.repository import Repository
 
@@ -23,11 +24,14 @@ def main() -> None:
     config = load_backtest_config(args.config)
 
     init_db(db_path)
-    Repository(db_path)
+    repo = Repository(db_path)
+    result = run_backtest(config, repo)
 
+    summary = result["summary"]
     print(
-        "Backtest bootstrap complete "
-        f"(db_path={db_path}, run_name={config.run.get('name')}, period={config.run.get('start_date')}~{config.run.get('end_date')})"
+        "Backtest run complete "
+        f"(db_path={db_path}, run_name={config.run.get('name')}, "
+        f"rebalances={summary.get('rebalances')}, final_equity={summary.get('final_equity')})"
     )
 
 

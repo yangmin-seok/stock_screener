@@ -89,6 +89,8 @@ def apply_filters(
     diagnostics: list[dict[str, Any]] = []
 
     for filter_name, raw_spec in filters.items():
+        if not isinstance(raw_spec, Mapping) and not is_dataclass(raw_spec):
+            continue
         spec = _spec_to_dict(raw_spec)
         if not bool(spec.get("enabled", False)):
             continue
