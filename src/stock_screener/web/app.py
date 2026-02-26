@@ -312,13 +312,13 @@ FOREIGN_BUY_METRIC_CONFIGS: dict[str, dict[str, Any]] = {
         "bucket_options": FOREIGN_BUY_VALUE_BUCKETS,
         "step": 1_000_000.0,
         "number_format": "%.0f",
-        "help_text": "금액(원)",
+        "help_text": "금액(원, 당일 결측이면 20D 누적도 결측 처리)",
     },
     "foreign_net_buy_volume_20d": {
         "bucket_options": FOREIGN_BUY_VOLUME_BUCKETS,
         "step": 1_000.0,
         "number_format": "%.0f",
-        "help_text": "수량(주)",
+        "help_text": "수량(주, 당일 결측이면 20D 누적도 결측 처리)",
     },
 }
 
@@ -2218,9 +2218,17 @@ st.dataframe(
         "chg_from_open_pct": st.column_config.NumberColumn("시가대비%", format="%.2f"),
         "volatility_20d": st.column_config.NumberColumn("변동성(20D)", format="%.2f"),
         "foreign_net_buy_volume": st.column_config.NumberColumn("외국인 순매수량", format="%,d"),
-        "foreign_net_buy_volume_20d": st.column_config.NumberColumn("외국인 순매수량(20D)", format="%,d"),
+        "foreign_net_buy_volume_20d": st.column_config.NumberColumn(
+            "외국인 순매수량(20D)",
+            format="%,d",
+            help="당일 외국인 순매수량이 결측이면 20D 누적도 결측으로 표시",
+        ),
         "foreign_net_buy_value": st.column_config.NumberColumn("외국인 순매수금액(당일)", format="%,d"),
-        "foreign_net_buy_value_20d": st.column_config.NumberColumn("외국인 순매수금액(20D 누적)", format="%,d"),
+        "foreign_net_buy_value_20d": st.column_config.NumberColumn(
+            "외국인 순매수금액(20D 누적)",
+            format="%,d",
+            help="당일 외국인 순매수금액이 결측이면 20D 누적도 결측으로 표시",
+        ),
     },
 )
 
