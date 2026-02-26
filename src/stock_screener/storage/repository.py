@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 import re
+from time import perf_counter
 from typing import Any
 
 import pandas as pd
 
 from stock_screener.storage.db import db_session
+
+
+logger = logging.getLogger(__name__)
 
 
 class Repository:
@@ -596,12 +601,165 @@ class Repository:
         WHERE t.active_flag = 1
         ORDER BY t.ticker
         """
+        started_at = perf_counter()
         with db_session(self.db_path) as conn:
-            return pd.read_sql_query(
+            frame = pd.read_sql_query(
                 query,
                 conn,
                 params={"dt": dt, "window": window, "foreign_window": foreign_window},
             )
+        elapsed_ms = (perf_counter() - started_at) * 1000.0
+        logger.info(
+            "repository.get_asof_frame dt=%s window=%d foreign_window=%d rows=%d elapsed_ms=%.2f",
+            dt,
+            window,
+            foreign_window,
+            len(frame),
+            elapsed_ms,
+        )
+        return frame
+
+    def get_asof_frames(self, dates: list[str], window: int = 20, foreign_window: int | None = None) -> dict[str, pd.DataFrame]:
+        if not dates:
+            return {}
+
+        foreign_window = window if foreign_window is None else foreign_window
+        unique_dates = sorted(set(dates))
+        max_dt = unique_dates[-1]
+
+        tickers_query = """
+        SELECT ticker, name, market
+        FROM ticker_master
+        WHERE active_flag = 1
+        ORDER BY ticker
+        """
+        prices_query = """
+        SELECT
+            p.date,
+            p.ticker,
+            p.open,
+            p.close,
+            COALESCE(c.value, p.value) AS value,
+            flow.foreign_net_buy_volume,
+            flow.foreign_net_buy_value
+        FROM prices_daily p
+        LEFT JOIN cap_daily c ON c.date = p.date AND c.ticker = p.ticker
+        LEFT JOIN investor_flow_daily flow ON flow.date = p.date AND flow.ticker = p.ticker
+        WHERE p.date <= :max_dt
+        ORDER BY p.ticker, p.date
+        """
+        financials_query = """
+        SELECT
+            fp.ticker,
+            fp.fiscal_period,
+            fp.period_type,
+            fp.reported_date,
+            fp.consolidation_type,
+            fp.source,
+            fp.eps,
+            fp.bps,
+            fp.is_correction,
+            fp.source_priority,
+            fp.source_ts,
+            COALESCE(fp.reported_date, fp.fiscal_period) AS effective_date
+        FROM financials_periodic fp
+        WHERE COALESCE(fp.reported_date, fp.fiscal_period) <= :max_dt
+        """
+
+        started_at = perf_counter()
+        with db_session(self.db_path) as conn:
+            tickers = pd.read_sql_query(tickers_query, conn)
+            prices = pd.read_sql_query(prices_query, conn, params={"max_dt": max_dt})
+            financials = pd.read_sql_query(financials_query, conn, params={"max_dt": max_dt})
+
+        if not prices.empty:
+            prices = prices.sort_values(["ticker", "date"], kind="mergesort")
+        if not financials.empty:
+            financials["is_correction"] = financials["is_correction"].fillna(0)
+            financials["source_priority"] = financials["source_priority"].fillna(0)
+
+        frames: dict[str, pd.DataFrame] = {}
+        for dt in unique_dates:
+            frames[dt] = self._build_asof_frame_from_panels(
+                dt=dt,
+                tickers=tickers,
+                prices=prices,
+                financials=financials,
+                window=window,
+                foreign_window=foreign_window,
+            )
+        elapsed_ms = (perf_counter() - started_at) * 1000.0
+        logger.info(
+            "repository.get_asof_frames dates=%d window=%d foreign_window=%d elapsed_ms=%.2f",
+            len(unique_dates),
+            window,
+            foreign_window,
+            elapsed_ms,
+        )
+        return frames
+
+    @staticmethod
+    def _build_asof_frame_from_panels(
+        dt: str,
+        tickers: pd.DataFrame,
+        prices: pd.DataFrame,
+        financials: pd.DataFrame,
+        window: int,
+        foreign_window: int,
+    ) -> pd.DataFrame:
+        if tickers.empty:
+            return pd.DataFrame()
+
+        if prices.empty:
+            price_latest = pd.DataFrame(columns=["ticker", "date", "open", "close", "value", "foreign_net_buy_volume", "foreign_net_buy_value"])
+            rolling = pd.DataFrame(columns=["ticker", "avg_value_20d", "foreign_cum_volume_20d", "foreign_cum_value_20d"])
+        else:
+            prices_asof = prices[prices["date"] <= dt]
+            if prices_asof.empty:
+                price_latest = pd.DataFrame(columns=["ticker", "date", "open", "close", "value", "foreign_net_buy_volume", "foreign_net_buy_value"])
+                rolling = pd.DataFrame(columns=["ticker", "avg_value_20d", "foreign_cum_volume_20d", "foreign_cum_value_20d"])
+            else:
+                price_latest = prices_asof.groupby("ticker", as_index=False).tail(1)
+                rolling = (
+                    prices_asof.groupby("ticker", group_keys=False)
+                    .apply(
+                        lambda g: pd.Series(
+                            {
+                                "avg_value_20d": g["value"].tail(window).mean(),
+                                "foreign_cum_volume_20d": g["foreign_net_buy_volume"].tail(foreign_window).sum(min_count=1),
+                                "foreign_cum_value_20d": g["foreign_net_buy_value"].tail(foreign_window).sum(min_count=1),
+                            }
+                        ),
+                        include_groups=False,
+                    )
+                    .reset_index()
+                )
+
+        if financials.empty:
+            fin_latest = pd.DataFrame(columns=["ticker", "fiscal_period", "period_type", "reported_date", "consolidation_type", "source", "eps", "bps"])
+        else:
+            fin_asof = financials[financials["effective_date"] <= dt]
+            if fin_asof.empty:
+                fin_latest = pd.DataFrame(columns=["ticker", "fiscal_period", "period_type", "reported_date", "consolidation_type", "source", "eps", "bps"])
+            else:
+                fin_sorted = fin_asof.sort_values(
+                    ["ticker", "is_correction", "effective_date", "source_priority", "source_ts"],
+                    ascending=[True, False, False, False, False],
+                    kind="mergesort",
+                )
+                fin_latest = (
+                    fin_sorted.groupby("ticker", as_index=False).head(1)[
+                        ["ticker", "fiscal_period", "period_type", "reported_date", "consolidation_type", "source", "eps", "bps"]
+                    ]
+                )
+
+        frame = tickers.merge(price_latest, on="ticker", how="left")
+        frame = frame.merge(rolling, on="ticker", how="left")
+        frame = frame.merge(fin_latest, on="ticker", how="left")
+        frame = frame.rename(columns={"source": "financial_source"})
+        frame["roe_proxy"] = frame["eps"] / frame["bps"]
+        frame.loc[frame["bps"].isna() | (frame["bps"] == 0), "roe_proxy"] = pd.NA
+        return frame.sort_values("ticker").reset_index(drop=True)
 
     def get_price_panel(self, tickers: list[str], start_date: str, end_date: str) -> pd.DataFrame:
         if not tickers:

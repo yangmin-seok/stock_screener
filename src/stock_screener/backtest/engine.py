@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
+import logging
+from time import perf_counter
 from typing import Any, Callable
 
 import pandas as pd
@@ -9,6 +11,9 @@ from stock_screener.backtest.calendar import make_rebalance_signal_dates, next_t
 from stock_screener.backtest.filters import apply_filters
 from stock_screener.backtest.portfolio import PortfolioState, mark_to_market_close, rebalance_at_open
 from stock_screener.backtest.selection import build_target_weights, select_tickers
+
+
+logger = logging.getLogger(__name__)
 
 
 def _cfg_section(section: Any) -> dict[str, Any]:
@@ -34,6 +39,29 @@ def _emit_progress(progress_callback: Callable[[dict[str, Any]], None] | None, p
     if progress_callback is None:
         return
     progress_callback(payload)
+
+
+def _preload_asof_frames(
+    repo: Any,
+    signal_dates: list[str],
+    filters_cfg: dict[str, Any],
+    preload_enabled: bool,
+) -> dict[str, pd.DataFrame]:
+    if not preload_enabled or not signal_dates or not hasattr(repo, 'get_asof_frames'):
+        return {}
+
+    foreign_window = int(filters_cfg.get('foreign_window', 20))
+    started_at = perf_counter()
+    frames = repo.get_asof_frames(signal_dates, foreign_window=foreign_window)
+    elapsed_ms = (perf_counter() - started_at) * 1000.0
+    logger.info(
+        'backtest.asof.preload signals=%d loaded=%d foreign_window=%d elapsed_ms=%.2f',
+        len(signal_dates),
+        len(frames),
+        foreign_window,
+        elapsed_ms,
+    )
+    return frames
 
 
 def run_backtest(
@@ -69,6 +97,8 @@ def run_backtest(
     anchor = _pick_run_value(run_cfg, 'anchor', default='month_end')
     signal_dates = make_rebalance_signal_dates(trading_dates_all, rule=rule, anchor=anchor)
     total_signals = len(signal_dates)
+    preload_enabled = bool(_pick_run_value(run_cfg, 'preload_asof_frames', default=True))
+    asof_frame_cache = _preload_asof_frames(repo, signal_dates, filters_cfg, preload_enabled)
 
     state = PortfolioState(cash=initial_capital)
     fee_bps = float(costs_cfg.get('fee_bps', costs_cfg.get('commission_bps', 0.0)) or 0.0)
@@ -122,7 +152,20 @@ def run_backtest(
             _emit_progress(progress_callback, {'stage': 'schedule', 'processed': processed, 'total': total_signals, 'eta_seconds': eta, 'signal_date': signal_date, 'message': reason})
             continue
 
-        frame = repo.get_asof_frame(signal_date, foreign_window=int(filters_cfg.get('foreign_window', 20)))
+        asof_started_at = perf_counter()
+        frame = asof_frame_cache.get(signal_date)
+        asof_source = 'preloaded'
+        if frame is None:
+            asof_source = 'query'
+            frame = repo.get_asof_frame(signal_date, foreign_window=int(filters_cfg.get('foreign_window', 20)))
+        asof_elapsed_ms = (perf_counter() - asof_started_at) * 1000.0
+        logger.info(
+            'backtest.asof.signal_date=%s source=%s rows=%d elapsed_ms=%.2f',
+            signal_date,
+            asof_source,
+            len(frame),
+            asof_elapsed_ms,
+        )
         filtered, diagnostics = apply_filters(frame, filters_cfg)
         selected, selection_meta = select_tickers(filtered, selection_cfg)
         run_records.append(

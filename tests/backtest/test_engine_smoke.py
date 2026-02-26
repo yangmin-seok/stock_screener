@@ -6,6 +6,8 @@ from stock_screener.backtest.engine import run_backtest
 
 class FakeRepo:
     def __init__(self) -> None:
+        self.asof_single_calls = 0
+        self.asof_bulk_calls = 0
         self.trading_dates = [
             "2025-01-02",
             "2025-01-03",
@@ -23,6 +25,7 @@ class FakeRepo:
         return self.trading_dates
 
     def get_asof_frame(self, dt: str, foreign_window: int = 20) -> pd.DataFrame:
+        self.asof_single_calls += 1
         base = {
             "ticker": ["AAA", "BBB"],
             "name": ["Alpha", "Beta"],
@@ -38,6 +41,10 @@ class FakeRepo:
         if dt >= "2025-01-08":
             base["foreign_cum_value_20d"] = [500.0, 6000.0]
         return pd.DataFrame(base)
+
+    def get_asof_frames(self, dates: list[str], foreign_window: int = 20) -> dict[str, pd.DataFrame]:
+        self.asof_bulk_calls += 1
+        return {dt: self.get_asof_frame(dt, foreign_window=foreign_window) for dt in sorted(set(dates))}
 
     def get_price_panel(self, tickers: list[str], start_date: str, end_date: str) -> pd.DataFrame:
         rows: list[dict[str, object]] = []
@@ -348,3 +355,29 @@ def test_engine_progress_callback_emits_done_event_and_summary_timing():
     assert events[-1].get("stage") == "done"
     assert float(result["summary"].get("elapsed_seconds", 0.0)) >= 0.0
     assert int(result["summary"].get("signals_total", 0)) >= 1
+
+
+def test_engine_preloaded_asof_frames_keep_result_equivalence_and_reduce_single_calls():
+    repo_preloaded = FakeRepo()
+    repo_query = FakeRepo()
+
+    cfg_preloaded = _cfg()
+    cfg_query = _cfg()
+    cfg_query.run["preload_asof_frames"] = False
+
+    result_preloaded = run_backtest(cfg_preloaded, repo_preloaded)
+    result_query = run_backtest(cfg_query, repo_query)
+
+    pd.testing.assert_frame_equal(result_preloaded["equity_curve"], result_query["equity_curve"])
+    pd.testing.assert_frame_equal(result_preloaded["rebalance_log"], result_query["rebalance_log"])
+    pd.testing.assert_frame_equal(result_preloaded["positions"], result_query["positions"])
+    pd.testing.assert_frame_equal(result_preloaded["trades"], result_query["trades"])
+    pd.testing.assert_frame_equal(result_preloaded["run_log"], result_query["run_log"])
+    summary_preloaded = {k: v for k, v in result_preloaded["summary"].items() if k != "elapsed_seconds"}
+    summary_query = {k: v for k, v in result_query["summary"].items() if k != "elapsed_seconds"}
+    assert summary_preloaded == summary_query
+
+    assert repo_preloaded.asof_bulk_calls == 1
+    assert repo_preloaded.asof_single_calls == len(result_preloaded["rebalance_log"])
+    assert repo_query.asof_bulk_calls == 0
+    assert repo_query.asof_single_calls == len(result_query["rebalance_log"])
