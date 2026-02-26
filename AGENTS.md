@@ -72,8 +72,13 @@
 
 ### 10-year backfill operating SOP (2 years x 5 chunks)
 - Execute long historical collection in chunks: `chunk_years=2`, `chunks=5`.
-- For chunk 1~4: collect only (`rebuild_snapshot=False`).
-- After chunk 5: run snapshot rebuild once.
+- Recommended command:
+  - `python -m stock_screener.cli --db-path data/screener.db --asof-date <YYYY-MM-DD> --lookback-days 3650 --chunk-years 2 --chunks 5`
+- After long collection, rebuild snapshot once:
+  - `python -m stock_screener.cli --db-path data/screener.db --asof-date <YYYY-MM-DD> --snapshot-only --lookback-days 3650`
+- Recent pipeline behavior:
+  - When `lookback_days>=3650`, pipeline may auto-enable long-window price/cap/investor-flow backfill if DB earliest price is newer than target start.
+  - Keep using chunk SOP for predictable operation and easier resume/retry.
 - Track per chunk:
   - financial rows upserted
   - `eps_non_null` / `bps_non_null`

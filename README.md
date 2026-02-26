@@ -89,6 +89,28 @@ python -m stock_screener.backtest.cli \
 - `trades.csv` (옵션)
 - `summary.json`
 
+
+## 10년 수집 실행 가이드 (가격/시총/외국인 + 펀더멘털)
+장기 백필은 아래 순서를 권장합니다.
+
+1) 청크 수집(2년 x 5청크)
+```bash
+python -m stock_screener.cli   --db-path data/screener.db   --asof-date 2026-02-26   --lookback-days 3650   --chunk-years 2   --chunks 5
+```
+
+2) 스냅샷만 재생성(마지막 1회)
+```bash
+python -m stock_screener.cli   --db-path data/screener.db   --asof-date 2026-02-26   --snapshot-only   --lookback-days 3650
+```
+
+운영 메모:
+- 최근 버전은 `lookback_days>=3650` 실행 시 DB의 earliest price가 부족하면 가격/시총/외국인 수집을 자동 long-window backfill로 전환합니다.
+- 다만 장기 실행 안정성을 위해서는 위 SOP(청크 수집 후 snapshot 1회)를 권장합니다.
+- 실행 후 상태 확인:
+```bash
+python -m stock_screener.cli --db-path data/screener.db --report-latest-batch
+```
+
 ## 수집 현황 확인
 - 최근 `daily_batch:*` 실행의 청크별 성공/실패, `row_count`, 품질 지표(`eps_non_null`, `bps_non_null`, `revenue_non_null`)를 확인할 수 있습니다.
 - 가능하면 message 내 분모(`metric_total` 또는 `metric=x/y`)를 사용하고, 분모가 없으면 `row_count`를 분모로 사용해 비율을 계산합니다.
