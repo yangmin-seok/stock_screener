@@ -1267,6 +1267,7 @@ technical_metric_availability = {
     "volatility_20d": "volatility_20d" in base.columns and base["volatility_20d"].notna().any(),
     "foreign_net_buy_volume": "foreign_net_buy_volume" in base.columns and base["foreign_net_buy_volume"].notna().any(),
     "foreign_net_buy_volume_20d": "foreign_net_buy_volume_20d" in base.columns and base["foreign_net_buy_volume_20d"].notna().any(),
+    "foreign_net_buy_value": "foreign_net_buy_value" in base.columns and base["foreign_net_buy_value"].notna().any(),
     "foreign_net_buy_value_20d": "foreign_net_buy_value_20d" in base.columns and base["foreign_net_buy_value_20d"].notna().any(),
 }
 
@@ -1734,6 +1735,71 @@ with technical_tab:
         row_disabled=not technical_metric_availability.get(foreign_buy_metric, False),
     )
 
+    with st.expander("외국인 데이터 진단", expanded=False):
+        foreign_metrics = [
+            "foreign_net_buy_volume",
+            "foreign_net_buy_volume_20d",
+            "foreign_net_buy_value",
+            "foreign_net_buy_value_20d",
+        ]
+        total_count = len(base)
+        st.write(f"선택 asof({asof}) 기준 전체 종목 수: **{total_count:,}개**")
+
+        if total_count == 0:
+            st.warning("외국인 진단 대상 데이터가 비어 있습니다. 수집/스냅샷 재생성 필요")
+        else:
+            diag_rows: list[dict[str, Any]] = []
+            for metric in foreign_metrics:
+                metric_name, metric_unit = FOREIGN_BUY_METRICS.get(metric, (metric, ""))
+                non_null_count = int(base[metric].notna().sum()) if metric in base.columns else 0
+                diag_rows.append(
+                    {
+                        "metric": metric,
+                        "label": metric_name,
+                        "unit": metric_unit,
+                        "non_null_count": non_null_count,
+                        "non_null_ratio": non_null_count / total_count,
+                    }
+                )
+
+            st.dataframe(
+                pd.DataFrame(diag_rows),
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "metric": "컬럼",
+                    "label": "지표",
+                    "unit": "단위",
+                    "non_null_count": st.column_config.NumberColumn("Non-null 건수", format="%,d"),
+                    "non_null_ratio": st.column_config.NumberColumn("Non-null 비율", format="%.2f%%"),
+                },
+            )
+
+            selected_diag_metric = st.session_state.get("foreign_buy_metric", "foreign_net_buy_value_20d")
+            selected_metric_name, _ = FOREIGN_BUY_METRICS.get(
+                selected_diag_metric,
+                FOREIGN_BUY_METRICS["foreign_net_buy_value_20d"],
+            )
+            st.caption(f"선택 metric 예시: {selected_metric_name} ({selected_diag_metric})")
+
+            if selected_diag_metric not in base.columns:
+                st.warning("선택 metric 컬럼이 snapshot에 없습니다. 수집/스냅샷 재생성 필요")
+            else:
+                metric_non_null = base[base[selected_diag_metric].notna()].copy()
+                if metric_non_null.empty:
+                    st.warning("선택 metric의 값이 비어 있습니다. 수집/스냅샷 재생성 필요")
+                else:
+                    metric_examples = [col for col in ["ticker", "name", "market", selected_diag_metric] if col in metric_non_null.columns]
+                    top_examples = metric_non_null.sort_values(selected_diag_metric, ascending=False).head(5)[metric_examples]
+                    bottom_examples = metric_non_null.sort_values(selected_diag_metric, ascending=True).head(5)[metric_examples]
+                    top_col, bottom_col = st.columns(2)
+                    with top_col:
+                        st.markdown("**상위 예시(Top 5)**")
+                        st.dataframe(top_examples, width="stretch", hide_index=True)
+                    with bottom_col:
+                        st.markdown("**하위 예시(Bottom 5)**")
+                        st.dataframe(bottom_examples, width="stretch", hide_index=True)
+
 
 filtered = base.copy()
 missing_tickers: list[str] = []
@@ -1977,14 +2043,19 @@ if apply_has_price_5y and "has_price_5y" in filtered.columns:
     filtered = filtered[filtered["has_price_5y"] == 1]
 if apply_has_price_10y and "has_price_10y" in filtered.columns:
     filtered = filtered[filtered["has_price_10y"] == 1]
+sort_candidates = [
+    "mcap", "pbr", "reserve_ratio", "roe_proxy", "ret_3m", "ret_6m", "ret_1y", "near_52w_high_ratio", "pos_52w", "div",
+    "avg_value_20d", "current_value", "relative_value", "ev_ebitda", "eps_cagr_5y", "eps_yoy_q", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y",
+    "rsi_14", "dist_sma20", "dist_sma50", "dist_sma200", "atr_14", "gap_pct", "chg_from_open_pct", "volatility_20d",
+    "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_value", "foreign_net_buy_value_20d",
+]
+selected_sort_metric = st.session_state.get("foreign_buy_metric", "foreign_net_buy_value_20d")
+if selected_sort_metric in sort_candidates:
+    sort_candidates = [selected_sort_metric] + [candidate for candidate in sort_candidates if candidate != selected_sort_metric]
+
 sort_col = st.selectbox(
     "정렬 컬럼",
-    [
-        "mcap", "pbr", "reserve_ratio", "roe_proxy", "ret_3m", "ret_6m", "ret_1y", "near_52w_high_ratio", "pos_52w", "div",
-        "avg_value_20d", "current_value", "relative_value", "ev_ebitda", "eps_cagr_5y", "eps_yoy_q", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y",
-        "rsi_14", "dist_sma20", "dist_sma50", "dist_sma200", "atr_14", "gap_pct", "chg_from_open_pct", "volatility_20d",
-        "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_value", "foreign_net_buy_value_20d",
-    ],
+    sort_candidates,
     key="sort_col",
 )
 ascending = st.checkbox("오름차순", key="ascending")
