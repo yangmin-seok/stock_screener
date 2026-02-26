@@ -12,8 +12,11 @@ from urllib.parse import urlencode
 
 import streamlit as st
 import pandas as pd
+from pykrx import stock
 
 from stock_screener.pipelines.daily_batch import BatchCancelledError, DailyBatchPipeline
+from stock_screener.backtest.config import BacktestConfig
+from stock_screener.backtest.engine import run_backtest
 from stock_screener.storage.db import init_db
 from stock_screener.storage.repository import Repository
 from stock_screener.web.filter_query import prune_query_filter_state
@@ -1321,7 +1324,7 @@ with header_cols[1]:
         _reset_all_filters()
         _safe_rerun()
 
-descriptive_tab, fundamental_tab, technical_tab = st.tabs(["Descriptive", "Fundamental", "Technical"])
+descriptive_tab, fundamental_tab, technical_tab, backtest_tab = st.tabs(["Descriptive", "Fundamental", "Technical", "Backtest"])
 
 with descriptive_tab:
     st.markdown("#### 시장")
@@ -1804,6 +1807,197 @@ with technical_tab:
                         st.markdown("**하위 예시(Bottom 5)**")
                         st.dataframe(bottom_examples, width="stretch", hide_index=True)
 
+
+with backtest_tab:
+    st.markdown("#### 외국인 순매수 백테스트")
+    get_trading_dates_fn = getattr(repo, "get_trading_dates", None)
+    if get_trading_dates_fn is None:
+        st.error("현재 실행 중인 Repository에는 get_trading_dates가 없습니다. 최신 코드를 재설치(pip install -e .) 후 다시 실행하세요.")
+    else:
+        trading_dates = get_trading_dates_fn()
+        if len(trading_dates) < 2:
+            st.warning("백테스트를 위한 거래일 데이터가 부족합니다. 먼저 수집을 실행하세요.")
+        else:
+            end_ts = pd.Timestamp(trading_dates[-1])
+            nine_years_ago = end_ts - pd.DateOffset(years=9)
+            default_start_idx = next((idx for idx, dt in enumerate(trading_dates) if pd.Timestamp(dt) >= nine_years_ago), 0)
+            bt_col1, bt_col2, bt_col3, bt_col4 = st.columns(4)
+            with bt_col1:
+                bt_start = st.selectbox("시작일", trading_dates, index=default_start_idx, key="bt_start")
+            with bt_col2:
+                bt_end = st.selectbox("종료일", trading_dates, index=len(trading_dates) - 1, key="bt_end")
+            with bt_col3:
+                bt_rebalance = st.selectbox("리밸런싱", ["W", "M"], index=1, key="bt_rebalance")
+            with bt_col4:
+                bt_benchmark_ticker = st.text_input(
+                    "벤치마크(티커 또는 KOSPI)",
+                    value="KOSPI",
+                    key="bt_benchmark_ticker",
+                    help="티커 입력 시 DB 수집 데이터 사용, KOSPI 입력 시 pykrx 지수(1001)를 조회합니다.",
+                )
+
+            fg_col1, fg_col2, fg_col3, fg_col4 = st.columns(4)
+            with fg_col1:
+                bt_foreign_enabled = st.checkbox("외국인 누적금액 필터 사용", value=True, key="bt_foreign_enabled")
+            with fg_col2:
+                bt_foreign_min_eok = st.number_input(
+                    "외국인 20D 누적금액 최소(억원)",
+                    min_value=0.0,
+                    value=100.0,
+                    step=50.0,
+                    format="%.0f",
+                    key="bt_foreign_min_eok",
+                    help="예: 1000 = 1,000억원 (KRW 100,000,000,000)",
+                )
+            with fg_col3:
+                bt_foreign_window = st.number_input(
+                    "누적 윈도우(거래일)",
+                    min_value=1,
+                    value=20,
+                    step=1,
+                    key="bt_foreign_window",
+                    help="최근 N 거래일의 외국인 순매수 금액을 합산해 필터/정렬 기준으로 사용합니다.",
+                )
+            with fg_col4:
+                bt_cap_n = st.number_input("상위 N (cap_n)", min_value=1, value=20, step=1, key="bt_cap_n")
+
+            bt_foreign_min_won = float(bt_foreign_min_eok) * 100_000_000.0
+            st.caption(
+                f"외국인 최소 기준: {bt_foreign_min_eok:,.0f}억원 (약 {bt_foreign_min_won:,.0f}원) · "
+                f"누적 윈도우 {int(bt_foreign_window)}거래일"
+            )
+
+            cs_col1, cs_col2, cs_col3 = st.columns(3)
+            with cs_col1:
+                bt_fee_bps = st.number_input("수수료(bps)", min_value=0.0, value=5.0, step=1.0, key="bt_fee_bps")
+            with cs_col2:
+                bt_slippage_bps = st.number_input("슬리피지(bps)", min_value=0.0, value=5.0, step=1.0, key="bt_slippage_bps")
+            with cs_col3:
+                bt_selection_mode = st.selectbox("선택 방식", ["all", "cap_n"], index=1, key="bt_selection_mode")
+
+            if "backtest_result" not in st.session_state:
+                st.session_state.backtest_result = None
+
+            if st.button("백테스트 실행", key="run_backtest_tab"):
+                if bt_start >= bt_end:
+                    st.error("시작일은 종료일보다 빨라야 합니다.")
+                else:
+                    filters_cfg: dict[str, Any] = {"foreign_window": int(bt_foreign_window)}
+                    if bt_foreign_enabled:
+                        filters_cfg["foreign_cum"] = {
+                            "enabled": True,
+                            "field": "foreign_cum",
+                            "op": "gte",
+                            "value": float(bt_foreign_min_won),
+                            "unit": "value",
+                            "normalize": "none",
+                            "missing_policy": "drop",
+                        }
+
+                    selection_cfg: dict[str, Any] = {"mode": bt_selection_mode, "empty_selection_policy": "cash"}
+                    if bt_selection_mode == "cap_n":
+                        selection_cfg.update(
+                            {
+                                "cap_n": int(bt_cap_n),
+                                "sort_by": "foreign_cum_value_20d",
+                                "sort_direction": "desc",
+                                "min_holdings": 1,
+                            }
+                        )
+
+                    cfg = BacktestConfig(
+                        run={
+                            "name": "ui_backtest",
+                            "start_date": bt_start,
+                            "end_date": bt_end,
+                            "rebalance": bt_rebalance,
+                            "initial_capital": 100000000.0,
+                        },
+                        universe={},
+                        filters=filters_cfg,
+                        selection=selection_cfg,
+                        portfolio={"weighting": "equal"},
+                        costs={"fee_bps": float(bt_fee_bps), "slippage_bps": float(bt_slippage_bps)},
+                        output={},
+                    )
+                    st.session_state.backtest_result = run_backtest(cfg, repo)
+
+            bt_result = st.session_state.get("backtest_result")
+            if bt_result:
+                bt_summary = bt_result.get("summary", {})
+                k1, k2, k3 = st.columns(3)
+                with k1:
+                    st.metric("최종 자산", f"{float(bt_summary.get('final_equity', 0.0)):,.0f}")
+                with k2:
+                    st.metric("리밸 횟수", int(bt_summary.get("rebalances", 0)))
+                with k3:
+                    st.metric("총 비용", f"{float(bt_summary.get('total_costs', 0.0)):,.0f}")
+
+                bt_curve = bt_result.get("equity_curve", pd.DataFrame())
+                if isinstance(bt_curve, pd.DataFrame) and not bt_curve.empty:
+                    chart_df = bt_curve.copy()
+                    chart_df["date"] = pd.to_datetime(chart_df["date"])
+
+                    benchmark_key = bt_benchmark_ticker.strip().upper()
+                    benchmark_panel = pd.DataFrame(columns=["date", "close"])
+                    benchmark_source = "db_ticker"
+
+                    if benchmark_key in {"KOSPI", "1001", "^KS11"}:
+                        benchmark_source = "pykrx_kospi"
+                        try:
+                            idx_frame = stock.get_index_ohlcv_by_date(
+                                bt_start.replace("-", ""),
+                                bt_end.replace("-", ""),
+                                "1001",
+                            )
+                            if not idx_frame.empty:
+                                idx_norm = idx_frame.reset_index().rename(columns={"날짜": "date", "종가": "close"})
+                                benchmark_panel = idx_norm[["date", "close"]]
+                        except Exception as exc:
+                            st.warning(f"KOSPI 벤치마크 조회 실패: {exc}")
+                    else:
+                        ticker_panel = repo.get_price_panel([bt_benchmark_ticker.strip()], bt_start, bt_end)
+                        if not ticker_panel.empty:
+                            benchmark_panel = ticker_panel[["date", "close"]]
+
+                    benchmark_panel = benchmark_panel.dropna(subset=["close"]) if not benchmark_panel.empty else benchmark_panel
+                    if benchmark_panel.empty:
+                        st.warning(
+                            f"벤치마크({bt_benchmark_ticker}) 데이터가 없어 전략 단독 곡선만 표시합니다. "
+                            "티커 벤치마크는 배치 수집 대상에 포함된 종목만 비교 가능합니다."
+                        )
+                        st.line_chart(chart_df.set_index("date")[["equity_close"]], use_container_width=True)
+                    else:
+                        bench = benchmark_panel[["date", "close"]].copy()
+                        bench["date"] = pd.to_datetime(bench["date"])
+                        initial_capital = 100000000.0
+                        bench = bench.sort_values("date")
+                        bench["benchmark_nav"] = initial_capital * (bench["close"] / float(bench["close"].iloc[0]))
+                        merged = chart_df[["date", "equity_close"]].merge(bench[["date", "benchmark_nav"]], on="date", how="left")
+                        merged = merged.ffill().dropna(subset=["equity_close", "benchmark_nav"]) 
+
+                        if merged.empty:
+                            st.warning(f"벤치마크({bt_benchmark_ticker})와 전략 기간이 겹치지 않아 전략 단독 곡선만 표시합니다.")
+                            st.line_chart(chart_df.set_index("date")[["equity_close"]], use_container_width=True)
+                        else:
+                            st.caption(f"벤치마크 소스: {'pykrx KOSPI(1001)' if benchmark_source == 'pykrx_kospi' else 'DB ticker'}")
+                            st.line_chart(merged.set_index("date")[["equity_close", "benchmark_nav"]], use_container_width=True)
+                            merged["excess_return"] = (merged["equity_close"] / merged["benchmark_nav"]) - 1.0
+                            st.line_chart(merged.set_index("date")[["excess_return"]], use_container_width=True)
+
+                            strategy_ret = (float(merged["equity_close"].iloc[-1]) / float(merged["equity_close"].iloc[0])) - 1.0
+                            bench_ret = (float(merged["benchmark_nav"].iloc[-1]) / float(merged["benchmark_nav"].iloc[0])) - 1.0
+                            alpha = strategy_ret - bench_ret
+                            b1, b2, b3 = st.columns(3)
+                            with b1:
+                                st.metric("전략 누적수익", f"{strategy_ret * 100:.2f}%")
+                            with b2:
+                                st.metric("벤치마크 누적수익", f"{bench_ret * 100:.2f}%")
+                            with b3:
+                                st.metric("초과수익", f"{alpha * 100:.2f}%")
+                bt_log = bt_result.get("rebalance_log", pd.DataFrame())
+                if isinstance(bt_log, pd.DataFrame) and not bt_log.empty:
+                    st.dataframe(bt_log[["signal_date", "exec_date", "selected_count", "selected_tickers", "turnover_notional", "costs"]], width="stretch", hide_index=True)
 
 filtered = base.copy()
 missing_tickers: list[str] = []
