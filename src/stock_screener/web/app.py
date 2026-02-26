@@ -12,6 +12,7 @@ from urllib.parse import urlencode
 
 import streamlit as st
 import pandas as pd
+from pykrx import stock
 
 from stock_screener.pipelines.daily_batch import BatchCancelledError, DailyBatchPipeline
 from stock_screener.backtest.config import BacktestConfig
@@ -1820,13 +1821,20 @@ with backtest_tab:
             end_ts = pd.Timestamp(trading_dates[-1])
             nine_years_ago = end_ts - pd.DateOffset(years=9)
             default_start_idx = next((idx for idx, dt in enumerate(trading_dates) if pd.Timestamp(dt) >= nine_years_ago), 0)
-            bt_col1, bt_col2, bt_col3 = st.columns(3)
+            bt_col1, bt_col2, bt_col3, bt_col4 = st.columns(4)
             with bt_col1:
                 bt_start = st.selectbox("시작일", trading_dates, index=default_start_idx, key="bt_start")
             with bt_col2:
                 bt_end = st.selectbox("종료일", trading_dates, index=len(trading_dates) - 1, key="bt_end")
             with bt_col3:
                 bt_rebalance = st.selectbox("리밸런싱", ["W", "M"], index=1, key="bt_rebalance")
+            with bt_col4:
+                bt_benchmark_ticker = st.text_input(
+                    "벤치마크(티커 또는 KOSPI)",
+                    value="KOSPI",
+                    key="bt_benchmark_ticker",
+                    help="티커 입력 시 DB 수집 데이터 사용, KOSPI 입력 시 pykrx 지수(1001)를 조회합니다.",
+                )
 
             fg_col1, fg_col2, fg_col3, fg_col4 = st.columns(4)
             with fg_col1:
@@ -1929,7 +1937,64 @@ with backtest_tab:
                 if isinstance(bt_curve, pd.DataFrame) and not bt_curve.empty:
                     chart_df = bt_curve.copy()
                     chart_df["date"] = pd.to_datetime(chart_df["date"])
-                    st.line_chart(chart_df.set_index("date")["equity_close"], use_container_width=True)
+
+                    benchmark_key = bt_benchmark_ticker.strip().upper()
+                    benchmark_panel = pd.DataFrame(columns=["date", "close"])
+                    benchmark_source = "db_ticker"
+
+                    if benchmark_key in {"KOSPI", "1001", "^KS11"}:
+                        benchmark_source = "pykrx_kospi"
+                        try:
+                            idx_frame = stock.get_index_ohlcv_by_date(
+                                bt_start.replace("-", ""),
+                                bt_end.replace("-", ""),
+                                "1001",
+                            )
+                            if not idx_frame.empty:
+                                idx_norm = idx_frame.reset_index().rename(columns={"날짜": "date", "종가": "close"})
+                                benchmark_panel = idx_norm[["date", "close"]]
+                        except Exception as exc:
+                            st.warning(f"KOSPI 벤치마크 조회 실패: {exc}")
+                    else:
+                        ticker_panel = repo.get_price_panel([bt_benchmark_ticker.strip()], bt_start, bt_end)
+                        if not ticker_panel.empty:
+                            benchmark_panel = ticker_panel[["date", "close"]]
+
+                    benchmark_panel = benchmark_panel.dropna(subset=["close"]) if not benchmark_panel.empty else benchmark_panel
+                    if benchmark_panel.empty:
+                        st.warning(
+                            f"벤치마크({bt_benchmark_ticker}) 데이터가 없어 전략 단독 곡선만 표시합니다. "
+                            "티커 벤치마크는 배치 수집 대상에 포함된 종목만 비교 가능합니다."
+                        )
+                        st.line_chart(chart_df.set_index("date")[["equity_close"]], use_container_width=True)
+                    else:
+                        bench = benchmark_panel[["date", "close"]].copy()
+                        bench["date"] = pd.to_datetime(bench["date"])
+                        initial_capital = 100000000.0
+                        bench = bench.sort_values("date")
+                        bench["benchmark_nav"] = initial_capital * (bench["close"] / float(bench["close"].iloc[0]))
+                        merged = chart_df[["date", "equity_close"]].merge(bench[["date", "benchmark_nav"]], on="date", how="left")
+                        merged = merged.ffill().dropna(subset=["equity_close", "benchmark_nav"]) 
+
+                        if merged.empty:
+                            st.warning(f"벤치마크({bt_benchmark_ticker})와 전략 기간이 겹치지 않아 전략 단독 곡선만 표시합니다.")
+                            st.line_chart(chart_df.set_index("date")[["equity_close"]], use_container_width=True)
+                        else:
+                            st.caption(f"벤치마크 소스: {'pykrx KOSPI(1001)' if benchmark_source == 'pykrx_kospi' else 'DB ticker'}")
+                            st.line_chart(merged.set_index("date")[["equity_close", "benchmark_nav"]], use_container_width=True)
+                            merged["excess_return"] = (merged["equity_close"] / merged["benchmark_nav"]) - 1.0
+                            st.line_chart(merged.set_index("date")[["excess_return"]], use_container_width=True)
+
+                            strategy_ret = (float(merged["equity_close"].iloc[-1]) / float(merged["equity_close"].iloc[0])) - 1.0
+                            bench_ret = (float(merged["benchmark_nav"].iloc[-1]) / float(merged["benchmark_nav"].iloc[0])) - 1.0
+                            alpha = strategy_ret - bench_ret
+                            b1, b2, b3 = st.columns(3)
+                            with b1:
+                                st.metric("전략 누적수익", f"{strategy_ret * 100:.2f}%")
+                            with b2:
+                                st.metric("벤치마크 누적수익", f"{bench_ret * 100:.2f}%")
+                            with b3:
+                                st.metric("초과수익", f"{alpha * 100:.2f}%")
                 bt_log = bt_result.get("rebalance_log", pd.DataFrame())
                 if isinstance(bt_log, pd.DataFrame) and not bt_log.empty:
                     st.dataframe(bt_log[["signal_date", "exec_date", "selected_count", "selected_tickers", "turnover_notional", "costs"]], width="stretch", hide_index=True)
