@@ -268,6 +268,23 @@ class DailyBatchPipeline:
         logger.info("Tickers upserted: %s", ticker_count)
 
         default_price_from_dt = dt - timedelta(days=lookback_days * 2)
+        earliest_price_date = self.repo.get_earliest_price_date()
+        latest_price_date = self.repo.get_latest_price_date()
+        should_backfill_prices = initial_backfill
+        if not should_backfill_prices and lookback_days >= 3650:
+            if not earliest_price_date:
+                should_backfill_prices = True
+            else:
+                earliest_dt = pd.to_datetime(earliest_price_date, errors="coerce")
+                if pd.notna(earliest_dt) and earliest_dt.date() > default_price_from_dt:
+                    should_backfill_prices = True
+        if should_backfill_prices and not initial_backfill:
+            logger.info(
+                "Auto-enabling long-window price/cap/investor-flow backfill: earliest_price=%s, target_from=%s",
+                earliest_price_date,
+                default_price_from_dt,
+            )
+
         price_rows = 0
         price_failures = 0
 
@@ -278,7 +295,7 @@ class DailyBatchPipeline:
 
         for idx, ticker in enumerate(tickers["ticker"], start=1):
             _raise_if_cancelled(phase=f"price_collection:{idx}/{ticker_count}")
-            if initial_backfill:
+            if should_backfill_prices:
                 from_dt = default_price_from_dt
             else:
                 checkpoint = self.repo.get_collection_checkpoint(ticker)
@@ -315,7 +332,11 @@ class DailyBatchPipeline:
                 )
 
         cap_rows = 0
-        cap_from_dt = default_price_from_dt if initial_backfill else pd.to_datetime(self.repo.get_latest_price_date() or asof_str).date() - timedelta(days=10)
+        cap_from_dt = (
+            default_price_from_dt
+            if should_backfill_prices
+            else pd.to_datetime(latest_price_date or asof_str).date() - timedelta(days=10)
+        )
         trading_dates = self.collector.trading_dates(cap_from_dt, dt)
         for idx, trading_dt in enumerate(trading_dates, start=1):
             _raise_if_cancelled(phase=f"cap_collection:{idx}/{len(trading_dates)}")
