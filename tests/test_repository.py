@@ -556,3 +556,137 @@ def test_replace_snapshot_persists_new_snapshot_metric_columns(tmp_path):
     assert float(row["foreign_net_buy_volume_20d"]) == 1000.0
     assert float(row["foreign_net_buy_ratio"]) == 1.234
     assert float(row["foreign_net_buy_value_20d"]) == 55_000_000.0
+
+
+def test_get_trading_dates_prefers_calendar_ticker_with_fallback(tmp_path):
+    db = tmp_path / "x.db"
+    init_db(db)
+    repo = Repository(db)
+
+    repo.upsert_prices(
+        pd.DataFrame(
+            [
+                {"date": "2025-01-02", "ticker": "AAA", "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.5, "volume": 100, "value": 1_000.0},
+                {"date": "2025-01-03", "ticker": "AAA", "open": 10.5, "high": 11.5, "low": 10.0, "close": 11.0, "volume": 120, "value": 1_200.0},
+            ]
+        )
+    )
+
+    assert repo.get_trading_dates() == ["2025-01-02", "2025-01-03"]
+
+    repo.upsert_prices(
+        pd.DataFrame(
+            [
+                {"date": "2025-01-03", "ticker": "calendar_ticker", "open": 0.0, "high": 0.0, "low": 0.0, "close": 0.0, "volume": 0.0, "value": 0.0},
+                {"date": "2025-01-06", "ticker": "calendar_ticker", "open": 0.0, "high": 0.0, "low": 0.0, "close": 0.0, "volume": 0.0, "value": 0.0},
+            ]
+        )
+    )
+
+    assert repo.get_trading_dates() == ["2025-01-03", "2025-01-06"]
+
+
+def test_get_asof_frame_computes_rolling_and_periodic_financials(tmp_path):
+    db = tmp_path / "x.db"
+    init_db(db)
+    repo = Repository(db)
+
+    repo.upsert_tickers(
+        pd.DataFrame([{"ticker": "AAA", "name": "Alpha", "market": "KOSPI", "active_flag": 1}])
+    )
+
+    repo.upsert_prices(
+        pd.DataFrame(
+            [
+                {"date": "2025-01-02", "ticker": "AAA", "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.0, "volume": 100, "value": 1000.0},
+                {"date": "2025-01-03", "ticker": "AAA", "open": 10.0, "high": 11.0, "low": 9.0, "close": 11.0, "volume": 100, "value": 2000.0},
+                {"date": "2025-01-06", "ticker": "AAA", "open": 11.0, "high": 12.0, "low": 10.0, "close": 12.0, "volume": 100, "value": 3000.0},
+            ]
+        )
+    )
+    repo.upsert_investor_flow(
+        pd.DataFrame(
+            [
+                {"date": "2025-01-02", "ticker": "AAA", "foreign_net_buy_volume": 1.0, "foreign_net_buy_value": 10.0},
+                {"date": "2025-01-03", "ticker": "AAA", "foreign_net_buy_volume": 2.0, "foreign_net_buy_value": 20.0},
+                {"date": "2025-01-06", "ticker": "AAA", "foreign_net_buy_volume": 3.0, "foreign_net_buy_value": 30.0},
+            ]
+        )
+    )
+    repo.upsert_financials_periodic(
+        pd.DataFrame(
+            [
+                {
+                    "ticker": "AAA",
+                    "fiscal_period": "2024-12-31",
+                    "period_type": "annual",
+                    "reported_date": "2025-01-01",
+                    "consolidation_type": "consolidated",
+                    "source": "fallback",
+                    "revenue": 100.0,
+                    "operating_income": 10.0,
+                    "net_income": 9.0,
+                    "eps": 2.0,
+                    "bps": 20.0,
+                    "is_correction": 0,
+                    "source_priority": 100,
+                }
+            ]
+        )
+    )
+
+    frame = repo.get_asof_frame("2025-01-06", window=2)
+    row = frame.loc[frame["ticker"] == "AAA"].iloc[0]
+
+    assert float(row["avg_value_20d"]) == 2500.0
+    assert float(row["foreign_cum_volume_20d"]) == 5.0
+    assert float(row["foreign_cum_value_20d"]) == 50.0
+    assert float(row["eps"]) == 2.0
+    assert float(row["bps"]) == 20.0
+    assert float(row["roe_proxy"]) == 0.1
+
+
+def test_get_asof_frame_preserves_nulls_for_filter_engine_policy(tmp_path):
+    db = tmp_path / "x.db"
+    init_db(db)
+    repo = Repository(db)
+
+    repo.upsert_tickers(
+        pd.DataFrame([{"ticker": "AAA", "name": "Alpha", "market": "KOSPI", "active_flag": 1}])
+    )
+    repo.upsert_prices(
+        pd.DataFrame(
+            [
+                {"date": "2025-01-02", "ticker": "AAA", "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.0, "volume": 100, "value": None}
+            ]
+        )
+    )
+
+    frame = repo.get_asof_frame("2025-01-02", window=20)
+    row = frame.loc[frame["ticker"] == "AAA"].iloc[0]
+
+    assert pd.isna(row["avg_value_20d"])
+    assert pd.isna(row["eps"])
+    assert pd.isna(row["bps"])
+
+
+def test_get_price_panel_returns_requested_tickers_and_period(tmp_path):
+    db = tmp_path / "x.db"
+    init_db(db)
+    repo = Repository(db)
+
+    repo.upsert_prices(
+        pd.DataFrame(
+            [
+                {"date": "2025-01-02", "ticker": "AAA", "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.0, "volume": 100, "value": 1000.0},
+                {"date": "2025-01-03", "ticker": "AAA", "open": 11.0, "high": 12.0, "low": 10.0, "close": 11.0, "volume": 120, "value": 1200.0},
+                {"date": "2025-01-03", "ticker": "BBB", "open": 20.0, "high": 21.0, "low": 19.0, "close": 20.0, "volume": 80, "value": 1600.0},
+            ]
+        )
+    )
+
+    panel = repo.get_price_panel(["BBB", "AAA"], "2025-01-02", "2025-01-03")
+
+    assert panel["ticker"].tolist() == ["AAA", "AAA", "BBB"]
+    assert panel["date"].tolist() == ["2025-01-02", "2025-01-03", "2025-01-03"]
+    assert list(panel.columns) == ["date", "ticker", "open", "close"]

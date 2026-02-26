@@ -486,6 +486,135 @@ class Repository:
         with db_session(self.db_path) as conn:
             return pd.read_sql_query(query, conn, params=(end_date, window))
 
+    def get_trading_dates(self) -> list[str]:
+        """Return trading dates sorted ascending.
+
+        Prefer the canonical `calendar_ticker` series and fall back to full-market
+        distinct dates when the canonical ticker is not available.
+        """
+        calendar_query = """
+        SELECT DISTINCT date
+        FROM prices_daily
+        WHERE ticker = 'calendar_ticker'
+        ORDER BY date
+        """
+        fallback_query = """
+        SELECT DISTINCT date
+        FROM prices_daily
+        ORDER BY date
+        """
+        with db_session(self.db_path) as conn:
+            calendar_rows = conn.execute(calendar_query).fetchall()
+            if calendar_rows:
+                return [str(row[0]) for row in calendar_rows]
+            fallback_rows = conn.execute(fallback_query).fetchall()
+        return [str(row[0]) for row in fallback_rows]
+
+    def get_asof_frame(self, dt: str, window: int = 20) -> pd.DataFrame:
+        query = """
+        WITH price_ranked AS (
+            SELECT
+                p.date,
+                p.ticker,
+                p.open,
+                p.close,
+                COALESCE(c.value, p.value) AS value,
+                flow.foreign_net_buy_volume,
+                flow.foreign_net_buy_value,
+                ROW_NUMBER() OVER (PARTITION BY p.ticker ORDER BY p.date DESC) AS rn
+            FROM prices_daily p
+            LEFT JOIN cap_daily c ON c.date = p.date AND c.ticker = p.ticker
+            LEFT JOIN investor_flow_daily flow ON flow.date = p.date AND flow.ticker = p.ticker
+            WHERE p.date <= :dt
+        ),
+        price_latest AS (
+            SELECT ticker, date, open, close, value, foreign_net_buy_volume, foreign_net_buy_value
+            FROM price_ranked
+            WHERE rn = 1
+        ),
+        rolling AS (
+            SELECT
+                ticker,
+                AVG(value) AS avg_value_20d,
+                SUM(foreign_net_buy_volume) AS foreign_cum_volume_20d,
+                SUM(foreign_net_buy_value) AS foreign_cum_value_20d
+            FROM price_ranked
+            WHERE rn <= :window
+            GROUP BY ticker
+        ),
+        fin_ranked AS (
+            SELECT
+                fp.ticker,
+                fp.fiscal_period,
+                fp.period_type,
+                fp.reported_date,
+                fp.consolidation_type,
+                fp.source,
+                fp.eps,
+                fp.bps,
+                ROW_NUMBER() OVER (
+                    PARTITION BY fp.ticker
+                    ORDER BY
+                        COALESCE(fp.is_correction, 0) DESC,
+                        COALESCE(fp.reported_date, fp.fiscal_period) DESC,
+                        COALESCE(fp.source_priority, 0) DESC,
+                        fp.source_ts DESC
+                ) AS rn
+            FROM financials_periodic fp
+            WHERE COALESCE(fp.reported_date, fp.fiscal_period) <= :dt
+        ),
+        fin_latest AS (
+            SELECT ticker, fiscal_period, period_type, reported_date, consolidation_type, source, eps, bps
+            FROM fin_ranked
+            WHERE rn = 1
+        )
+        SELECT
+            t.ticker,
+            t.name,
+            t.market,
+            pl.date,
+            pl.open,
+            pl.close,
+            pl.value,
+            pl.foreign_net_buy_volume,
+            pl.foreign_net_buy_value,
+            r.avg_value_20d,
+            r.foreign_cum_volume_20d,
+            r.foreign_cum_value_20d,
+            fin.eps,
+            fin.bps,
+            fin.fiscal_period,
+            fin.period_type,
+            fin.reported_date,
+            fin.consolidation_type,
+            fin.source AS financial_source,
+            CASE WHEN fin.bps IS NOT NULL AND fin.bps != 0 THEN fin.eps / fin.bps ELSE NULL END AS roe_proxy
+        FROM ticker_master t
+        LEFT JOIN price_latest pl ON pl.ticker = t.ticker
+        LEFT JOIN rolling r ON r.ticker = t.ticker
+        LEFT JOIN fin_latest fin ON fin.ticker = t.ticker
+        WHERE t.active_flag = 1
+        ORDER BY t.ticker
+        """
+        with db_session(self.db_path) as conn:
+            return pd.read_sql_query(query, conn, params={"dt": dt, "window": window})
+
+    def get_price_panel(self, tickers: list[str], start_date: str, end_date: str) -> pd.DataFrame:
+        if not tickers:
+            return pd.DataFrame(columns=["date", "ticker", "open", "close"])
+
+        placeholders = ",".join(["?"] * len(tickers))
+        query = f"""
+        SELECT date, ticker, open, close
+        FROM prices_daily
+        WHERE ticker IN ({placeholders})
+          AND date BETWEEN ? AND ?
+        ORDER BY date ASC, ticker ASC
+        """
+        params: tuple[Any, ...] = (*tickers, start_date, end_date)
+        with db_session(self.db_path) as conn:
+            return pd.read_sql_query(query, conn, params=params)
+
     def get_daily_join(self, dt: str) -> pd.DataFrame:
         query = """
         WITH fin AS (
