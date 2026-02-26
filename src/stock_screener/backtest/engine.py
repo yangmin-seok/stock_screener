@@ -64,7 +64,9 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
     positions_records: list[dict[str, Any]] = []
     trades_records: list[dict[str, Any]] = []
 
-    for signal_date in signal_dates:
+    trading_date_to_idx = {dt: idx for idx, dt in enumerate(trading_dates_all)}
+
+    for i, signal_date in enumerate(signal_dates):
         exec_date = next_trading_day(trading_dates_all, signal_date)
         if not exec_date:
             continue
@@ -83,10 +85,11 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
             max_weight=portfolio_cfg.get('max_weight'),
         )
 
-        next_exec = next_trading_day(trading_dates_all, exec_date)
-        if next_exec and next_exec in trading_dates_all:
-            next_idx = trading_dates_all.index(next_exec)
-            segment_end = trading_dates_all[next_idx - 1] if next_idx > 0 else exec_date
+        next_signal_date = signal_dates[i + 1] if i + 1 < len(signal_dates) else None
+        next_exec_date = next_trading_day(trading_dates_all, next_signal_date) if next_signal_date else None
+        if next_exec_date and next_exec_date in trading_date_to_idx:
+            next_exec_idx = trading_date_to_idx[next_exec_date]
+            segment_end = trading_dates_all[next_exec_idx - 1] if next_exec_idx > 0 else exec_date
         else:
             segment_end = trading_dates_all[-1]
 

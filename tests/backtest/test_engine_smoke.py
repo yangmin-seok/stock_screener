@@ -142,3 +142,66 @@ def test_engine_handles_empty_equity_records_for_monthly_single_month():
     assert result["equity_curve"].empty
     assert list(result["equity_curve"].columns) == ["date", "equity_close", "return"]
     assert result["summary"]["final_equity"] == 1_000_000
+
+
+def test_engine_weekly_equity_curve_contains_intermediate_trading_days():
+    repo = FakeRepo()
+    result = run_backtest(_cfg(), repo)
+
+    equity_dates = result["equity_curve"]["date"].tolist()
+    rebalance_exec_dates = result["rebalance_log"]["exec_date"].tolist()
+
+    assert len(equity_dates) > len(rebalance_exec_dates)
+    assert any(date not in rebalance_exec_dates for date in equity_dates)
+
+
+def test_engine_monthly_equity_curve_contains_intermediate_trading_days():
+    repo = FakeRepo()
+    config = BacktestConfig(
+        run={
+            "name": "monthly-with-middle-days",
+            "start_date": "2025-01-02",
+            "end_date": "2025-02-20",
+            "rebalance": "M",
+            "initial_capital": 1_000_000,
+        },
+        universe={},
+        filters={},
+        selection={
+            "mode": "cap_n",
+            "cap_n": 1,
+            "sort_by": "foreign_cum_value_20d",
+            "sort_direction": "desc",
+            "empty_selection_policy": "cash",
+        },
+        portfolio={"weighting": "equal"},
+        costs={"fee_bps": 0.0, "slippage_bps": 0.0},
+        output={},
+    )
+    repo.trading_dates = [
+        "2025-01-02",
+        "2025-01-03",
+        "2025-01-06",
+        "2025-01-07",
+        "2025-01-08",
+        "2025-01-31",
+        "2025-02-03",
+        "2025-02-04",
+        "2025-02-05",
+        "2025-02-06",
+        "2025-02-07",
+        "2025-02-10",
+        "2025-02-11",
+        "2025-02-12",
+        "2025-02-13",
+        "2025-02-14",
+        "2025-02-20",
+    ]
+
+    result = run_backtest(config, repo)
+    equity_dates = result["equity_curve"]["date"].tolist()
+    rebalance_exec_dates = result["rebalance_log"]["exec_date"].tolist()
+
+    assert len(equity_dates) > len(rebalance_exec_dates)
+    assert "2025-02-04" in equity_dates
+    assert "2025-02-04" not in rebalance_exec_dates
