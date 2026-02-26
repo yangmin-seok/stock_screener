@@ -1809,104 +1809,107 @@ with technical_tab:
 
 with backtest_tab:
     st.markdown("#### 외국인 순매수 백테스트")
-    trading_dates = repo.get_trading_dates()
-    if len(trading_dates) < 2:
-        st.warning("백테스트를 위한 거래일 데이터가 부족합니다. 먼저 수집을 실행하세요.")
+    get_trading_dates_fn = getattr(repo, "get_trading_dates", None)
+    if get_trading_dates_fn is None:
+        st.error("현재 실행 중인 Repository에는 get_trading_dates가 없습니다. 최신 코드를 재설치(pip install -e .) 후 다시 실행하세요.")
     else:
-        default_start_idx = max(0, len(trading_dates) - 252)
-        bt_col1, bt_col2, bt_col3 = st.columns(3)
-        with bt_col1:
-            bt_start = st.selectbox("시작일", trading_dates, index=default_start_idx, key="bt_start")
-        with bt_col2:
-            bt_end = st.selectbox("종료일", trading_dates, index=len(trading_dates) - 1, key="bt_end")
-        with bt_col3:
-            bt_rebalance = st.selectbox("리밸런싱", ["W", "M"], index=1, key="bt_rebalance")
+        trading_dates = get_trading_dates_fn()
+        if len(trading_dates) < 2:
+            st.warning("백테스트를 위한 거래일 데이터가 부족합니다. 먼저 수집을 실행하세요.")
+        else:
+            default_start_idx = max(0, len(trading_dates) - 252)
+            bt_col1, bt_col2, bt_col3 = st.columns(3)
+            with bt_col1:
+                bt_start = st.selectbox("시작일", trading_dates, index=default_start_idx, key="bt_start")
+            with bt_col2:
+                bt_end = st.selectbox("종료일", trading_dates, index=len(trading_dates) - 1, key="bt_end")
+            with bt_col3:
+                bt_rebalance = st.selectbox("리밸런싱", ["W", "M"], index=1, key="bt_rebalance")
 
-        fg_col1, fg_col2, fg_col3, fg_col4 = st.columns(4)
-        with fg_col1:
-            bt_foreign_enabled = st.checkbox("외국인 누적금액 필터 사용", value=True, key="bt_foreign_enabled")
-        with fg_col2:
-            bt_foreign_min = st.number_input("외국인 20D 누적금액 최소", value=0.0, step=100000000.0, key="bt_foreign_min")
-        with fg_col3:
-            bt_foreign_window = st.number_input("누적 윈도우(거래일)", min_value=1, value=20, step=1, key="bt_foreign_window")
-        with fg_col4:
-            bt_cap_n = st.number_input("상위 N (cap_n)", min_value=1, value=20, step=1, key="bt_cap_n")
+            fg_col1, fg_col2, fg_col3, fg_col4 = st.columns(4)
+            with fg_col1:
+                bt_foreign_enabled = st.checkbox("외국인 누적금액 필터 사용", value=True, key="bt_foreign_enabled")
+            with fg_col2:
+                bt_foreign_min = st.number_input("외국인 20D 누적금액 최소", value=0.0, step=100000000.0, key="bt_foreign_min")
+            with fg_col3:
+                bt_foreign_window = st.number_input("누적 윈도우(거래일)", min_value=1, value=20, step=1, key="bt_foreign_window")
+            with fg_col4:
+                bt_cap_n = st.number_input("상위 N (cap_n)", min_value=1, value=20, step=1, key="bt_cap_n")
 
-        cs_col1, cs_col2, cs_col3 = st.columns(3)
-        with cs_col1:
-            bt_fee_bps = st.number_input("수수료(bps)", min_value=0.0, value=5.0, step=1.0, key="bt_fee_bps")
-        with cs_col2:
-            bt_slippage_bps = st.number_input("슬리피지(bps)", min_value=0.0, value=5.0, step=1.0, key="bt_slippage_bps")
-        with cs_col3:
-            bt_selection_mode = st.selectbox("선택 방식", ["all", "cap_n"], index=1, key="bt_selection_mode")
+            cs_col1, cs_col2, cs_col3 = st.columns(3)
+            with cs_col1:
+                bt_fee_bps = st.number_input("수수료(bps)", min_value=0.0, value=5.0, step=1.0, key="bt_fee_bps")
+            with cs_col2:
+                bt_slippage_bps = st.number_input("슬리피지(bps)", min_value=0.0, value=5.0, step=1.0, key="bt_slippage_bps")
+            with cs_col3:
+                bt_selection_mode = st.selectbox("선택 방식", ["all", "cap_n"], index=1, key="bt_selection_mode")
 
-        if "backtest_result" not in st.session_state:
-            st.session_state.backtest_result = None
+            if "backtest_result" not in st.session_state:
+                st.session_state.backtest_result = None
 
-        if st.button("백테스트 실행", key="run_backtest_tab"):
-            if bt_start >= bt_end:
-                st.error("시작일은 종료일보다 빨라야 합니다.")
-            else:
-                filters_cfg: dict[str, Any] = {"foreign_window": int(bt_foreign_window)}
-                if bt_foreign_enabled:
-                    filters_cfg["foreign_cum"] = {
-                        "enabled": True,
-                        "field": "foreign_cum",
-                        "op": "gte",
-                        "value": float(bt_foreign_min),
-                        "unit": "value",
-                        "normalize": "none",
-                        "missing_policy": "drop",
-                    }
-
-                selection_cfg: dict[str, Any] = {"mode": bt_selection_mode, "empty_selection_policy": "cash"}
-                if bt_selection_mode == "cap_n":
-                    selection_cfg.update(
-                        {
-                            "cap_n": int(bt_cap_n),
-                            "sort_by": "foreign_cum_value_20d",
-                            "sort_direction": "desc",
-                            "min_holdings": 1,
+            if st.button("백테스트 실행", key="run_backtest_tab"):
+                if bt_start >= bt_end:
+                    st.error("시작일은 종료일보다 빨라야 합니다.")
+                else:
+                    filters_cfg: dict[str, Any] = {"foreign_window": int(bt_foreign_window)}
+                    if bt_foreign_enabled:
+                        filters_cfg["foreign_cum"] = {
+                            "enabled": True,
+                            "field": "foreign_cum",
+                            "op": "gte",
+                            "value": float(bt_foreign_min),
+                            "unit": "value",
+                            "normalize": "none",
+                            "missing_policy": "drop",
                         }
+
+                    selection_cfg: dict[str, Any] = {"mode": bt_selection_mode, "empty_selection_policy": "cash"}
+                    if bt_selection_mode == "cap_n":
+                        selection_cfg.update(
+                            {
+                                "cap_n": int(bt_cap_n),
+                                "sort_by": "foreign_cum_value_20d",
+                                "sort_direction": "desc",
+                                "min_holdings": 1,
+                            }
+                        )
+
+                    cfg = BacktestConfig(
+                        run={
+                            "name": "ui_backtest",
+                            "start_date": bt_start,
+                            "end_date": bt_end,
+                            "rebalance": bt_rebalance,
+                            "initial_capital": 100000000.0,
+                        },
+                        universe={},
+                        filters=filters_cfg,
+                        selection=selection_cfg,
+                        portfolio={"weighting": "equal"},
+                        costs={"fee_bps": float(bt_fee_bps), "slippage_bps": float(bt_slippage_bps)},
+                        output={},
                     )
+                    st.session_state.backtest_result = run_backtest(cfg, repo)
 
-                cfg = BacktestConfig(
-                    run={
-                        "name": "ui_backtest",
-                        "start_date": bt_start,
-                        "end_date": bt_end,
-                        "rebalance": bt_rebalance,
-                        "initial_capital": 100000000.0,
-                    },
-                    universe={},
-                    filters=filters_cfg,
-                    selection=selection_cfg,
-                    portfolio={"weighting": "equal"},
-                    costs={"fee_bps": float(bt_fee_bps), "slippage_bps": float(bt_slippage_bps)},
-                    output={},
-                )
-                st.session_state.backtest_result = run_backtest(cfg, repo)
+            bt_result = st.session_state.get("backtest_result")
+            if bt_result:
+                bt_summary = bt_result.get("summary", {})
+                k1, k2, k3 = st.columns(3)
+                with k1:
+                    st.metric("최종 자산", f"{float(bt_summary.get('final_equity', 0.0)):,.0f}")
+                with k2:
+                    st.metric("리밸 횟수", int(bt_summary.get("rebalances", 0)))
+                with k3:
+                    st.metric("총 비용", f"{float(bt_summary.get('total_costs', 0.0)):,.0f}")
 
-        bt_result = st.session_state.get("backtest_result")
-        if bt_result:
-            bt_summary = bt_result.get("summary", {})
-            k1, k2, k3 = st.columns(3)
-            with k1:
-                st.metric("최종 자산", f"{float(bt_summary.get('final_equity', 0.0)):,.0f}")
-            with k2:
-                st.metric("리밸 횟수", int(bt_summary.get("rebalances", 0)))
-            with k3:
-                st.metric("총 비용", f"{float(bt_summary.get('total_costs', 0.0)):,.0f}")
-
-            bt_curve = bt_result.get("equity_curve", pd.DataFrame())
-            if isinstance(bt_curve, pd.DataFrame) and not bt_curve.empty:
-                chart_df = bt_curve.copy()
-                chart_df["date"] = pd.to_datetime(chart_df["date"])
-                st.line_chart(chart_df.set_index("date")["equity_close"], use_container_width=True)
-            bt_log = bt_result.get("rebalance_log", pd.DataFrame())
-            if isinstance(bt_log, pd.DataFrame) and not bt_log.empty:
-                st.dataframe(bt_log[["signal_date", "exec_date", "selected_count", "selected_tickers", "turnover_notional", "costs"]], width="stretch", hide_index=True)
-
+                bt_curve = bt_result.get("equity_curve", pd.DataFrame())
+                if isinstance(bt_curve, pd.DataFrame) and not bt_curve.empty:
+                    chart_df = bt_curve.copy()
+                    chart_df["date"] = pd.to_datetime(chart_df["date"])
+                    st.line_chart(chart_df.set_index("date")["equity_close"], use_container_width=True)
+                bt_log = bt_result.get("rebalance_log", pd.DataFrame())
+                if isinstance(bt_log, pd.DataFrame) and not bt_log.empty:
+                    st.dataframe(bt_log[["signal_date", "exec_date", "selected_count", "selected_tickers", "turnover_notional", "costs"]], width="stretch", hide_index=True)
 
 filtered = base.copy()
 missing_tickers: list[str] = []
