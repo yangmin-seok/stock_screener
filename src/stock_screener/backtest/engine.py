@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
@@ -28,7 +28,19 @@ def _pick_run_value(run_cfg: dict[str, Any], *keys: str, default: Any = None) ->
     return default
 
 
-def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, Any]]:
+
+
+def _emit_progress(progress_callback: Callable[[dict[str, Any]], None] | None, payload: dict[str, Any]) -> None:
+    if progress_callback is None:
+        return
+    progress_callback(payload)
+
+
+def run_backtest(
+    config: Any,
+    repo: Any,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, pd.DataFrame | dict[str, Any]]:
     run_cfg = _cfg_section(getattr(config, 'run', {}))
     filters_cfg = _cfg_section(getattr(config, 'filters', {}))
     selection_cfg = _cfg_section(getattr(config, 'selection', {}))
@@ -43,17 +55,20 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
 
     trading_dates_all = [d for d in repo.get_trading_dates() if start <= d <= end]
     if len(trading_dates_all) < 2:
+        _emit_progress(progress_callback, {'stage': 'init', 'processed': 0, 'total': 0, 'eta_seconds': 0.0, 'message': 'insufficient_trading_dates'})
         return {
             'equity_curve': pd.DataFrame(columns=['date', 'equity_close', 'return']),
             'rebalance_log': pd.DataFrame(columns=['signal_date', 'exec_date', 'selected_count', 'turnover_notional', 'costs', 'skipped', 'skip_reason']),
+            'run_log': pd.DataFrame(columns=['signal_date', 'exec_date', 'stage', 'status', 'message', 'universe_count', 'filtered_count', 'selected_count']),
             'positions': pd.DataFrame(columns=['date', 'ticker', 'weight', 'shares', 'open_price']),
             'trades': pd.DataFrame(columns=['exec_date', 'ticker', 'delta_shares', 'price_open', 'notional', 'cost']),
-            'summary': {'rebalances': 0, 'skipped_rebalances': 0, 'skipped_rebalance_reasons': {}, 'final_equity': initial_capital, 'turnover': 0.0, 'number_of_trades': 0, 'total_costs': 0.0},
+            'summary': {'rebalances': 0, 'skipped_rebalances': 0, 'skipped_rebalance_reasons': {}, 'final_equity': initial_capital, 'turnover': 0.0, 'number_of_trades': 0, 'total_costs': 0.0, 'elapsed_seconds': 0.0, 'signals_total': 0},
         }
 
     rule = _pick_run_value(run_cfg, 'rebalance', 'rebalance_rule', default='M')
     anchor = _pick_run_value(run_cfg, 'anchor', default='month_end')
     signal_dates = make_rebalance_signal_dates(trading_dates_all, rule=rule, anchor=anchor)
+    total_signals = len(signal_dates)
 
     state = PortfolioState(cash=initial_capital)
     fee_bps = float(costs_cfg.get('fee_bps', costs_cfg.get('commission_bps', 0.0)) or 0.0)
@@ -63,9 +78,11 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
     rebalance_records: list[dict[str, Any]] = []
     positions_records: list[dict[str, Any]] = []
     trades_records: list[dict[str, Any]] = []
+    run_records: list[dict[str, Any]] = []
     skipped_rebalance_reasons: dict[str, int] = {}
 
     trading_date_to_idx = {dt: idx for idx, dt in enumerate(trading_dates_all)}
+    loop_started_at = pd.Timestamp.utcnow().timestamp()
 
     for i, signal_date in enumerate(signal_dates):
         exec_date = next_trading_day(trading_dates_all, signal_date)
@@ -86,11 +103,40 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
                     'skip_reason': reason,
                 }
             )
+            run_records.append(
+                {
+                    'signal_date': signal_date,
+                    'exec_date': None,
+                    'stage': 'schedule',
+                    'status': 'skipped',
+                    'message': reason,
+                    'universe_count': 0,
+                    'filtered_count': 0,
+                    'selected_count': 0,
+                }
+            )
+            processed = i + 1
+            elapsed = pd.Timestamp.utcnow().timestamp() - loop_started_at
+            avg = elapsed / processed if processed > 0 else 0.0
+            eta = max((total_signals - processed) * avg, 0.0)
+            _emit_progress(progress_callback, {'stage': 'schedule', 'processed': processed, 'total': total_signals, 'eta_seconds': eta, 'signal_date': signal_date, 'message': reason})
             continue
 
         frame = repo.get_asof_frame(signal_date, foreign_window=int(filters_cfg.get('foreign_window', 20)))
         filtered, diagnostics = apply_filters(frame, filters_cfg)
         selected, selection_meta = select_tickers(filtered, selection_cfg)
+        run_records.append(
+            {
+                'signal_date': signal_date,
+                'exec_date': exec_date,
+                'stage': 'selection',
+                'status': 'ok',
+                'message': f"filters={len(diagnostics)}",
+                'universe_count': int(len(frame)),
+                'filtered_count': int(len(filtered)),
+                'selected_count': int(len(selected)),
+            }
+        )
 
         empty_policy = str(selection_cfg.get('empty_selection_policy', 'cash'))
         if not selected and empty_policy == 'keep_prev':
@@ -129,6 +175,23 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
                     'skip_reason': reason,
                 }
             )
+            run_records.append(
+                {
+                    'signal_date': signal_date,
+                    'exec_date': exec_date,
+                    'stage': 'pricing',
+                    'status': 'skipped',
+                    'message': reason,
+                    'universe_count': int(len(frame)),
+                    'filtered_count': int(len(filtered)),
+                    'selected_count': int(len(selected)),
+                }
+            )
+            processed = i + 1
+            elapsed = pd.Timestamp.utcnow().timestamp() - loop_started_at
+            avg = elapsed / processed if processed > 0 else 0.0
+            eta = max((total_signals - processed) * avg, 0.0)
+            _emit_progress(progress_callback, {'stage': 'pricing', 'processed': processed, 'total': total_signals, 'eta_seconds': eta, 'signal_date': signal_date, 'exec_date': exec_date, 'message': reason})
             continue
 
         open_slice = panel[panel['date'] == exec_date]
@@ -181,6 +244,23 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
                 'skip_reason': None,
             }
         )
+        run_records.append(
+            {
+                'signal_date': signal_date,
+                'exec_date': exec_date,
+                'stage': 'rebalance',
+                'status': 'ok',
+                'message': f"segment_end={segment_end}",
+                'universe_count': int(len(frame)),
+                'filtered_count': int(len(filtered)),
+                'selected_count': int(len(selected)),
+            }
+        )
+        processed = i + 1
+        elapsed = pd.Timestamp.utcnow().timestamp() - loop_started_at
+        avg = elapsed / processed if processed > 0 else 0.0
+        eta = max((total_signals - processed) * avg, 0.0)
+        _emit_progress(progress_callback, {'stage': 'rebalance', 'processed': processed, 'total': total_signals, 'eta_seconds': eta, 'signal_date': signal_date, 'exec_date': exec_date, 'message': 'ok'})
 
     if not equity_records:
         equity_curve = pd.DataFrame(columns=['date', 'equity_close', 'return'])
@@ -189,6 +269,7 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
         equity_curve['return'] = equity_curve['equity_close'].pct_change().fillna(0.0)
 
     rebalance_log = pd.DataFrame(rebalance_records)
+    run_log = pd.DataFrame(run_records)
     trades = pd.DataFrame(trades_records)
 
     final_equity = float(state.cash) if state.cash is not None else float(initial_capital)
@@ -196,6 +277,7 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
         final_equity = float(equity_curve['equity_close'].iloc[-1])
 
     skipped_rebalances = int(sum(skipped_rebalance_reasons.values()))
+    elapsed_seconds = max(pd.Timestamp.utcnow().timestamp() - loop_started_at, 0.0)
     summary = {
         'rebalances': max(len(rebalance_records) - skipped_rebalances, 0),
         'skipped_rebalances': skipped_rebalances,
@@ -204,11 +286,16 @@ def run_backtest(config: Any, repo: Any) -> dict[str, pd.DataFrame | dict[str, A
         'total_costs': float(rebalance_log['costs'].sum()) if not rebalance_log.empty else 0.0,
         'turnover': float(rebalance_log['turnover_notional'].sum()) if not rebalance_log.empty else 0.0,
         'number_of_trades': int(len(trades)),
+        'elapsed_seconds': float(elapsed_seconds),
+        'signals_total': int(total_signals),
     }
+
+    _emit_progress(progress_callback, {'stage': 'done', 'processed': total_signals, 'total': total_signals, 'eta_seconds': 0.0, 'message': 'completed'})
 
     return {
         'equity_curve': equity_curve,
         'rebalance_log': rebalance_log,
+        'run_log': run_log,
         'positions': pd.DataFrame(positions_records),
         'trades': trades,
         'summary': summary,

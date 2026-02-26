@@ -1920,18 +1920,43 @@ with backtest_tab:
                         costs={"fee_bps": float(bt_fee_bps), "slippage_bps": float(bt_slippage_bps)},
                         output={},
                     )
-                    st.session_state.backtest_result = run_backtest(cfg, repo)
+
+                    progress_text = st.empty()
+                    progress_bar = st.progress(0.0)
+
+                    def _on_backtest_progress(evt: dict[str, Any]) -> None:
+                        processed = int(evt.get("processed", 0) or 0)
+                        total = int(evt.get("total", 0) or 0)
+                        eta_seconds = float(evt.get("eta_seconds", 0.0) or 0.0)
+                        stage = str(evt.get("stage", ""))
+                        message = str(evt.get("message", ""))
+                        ratio = (processed / total) if total > 0 else 0.0
+                        progress_bar.progress(min(max(ratio, 0.0), 1.0))
+                        if total > 0:
+                            progress_text.info(
+                                f"백테스트 진행중: {processed}/{total} · 단계={stage} · 예상 잔여 {eta_seconds:,.1f}초 · {message}"
+                            )
+                        else:
+                            progress_text.info(f"백테스트 진행중: 단계={stage} · {message}")
+
+                    st.session_state.backtest_result = run_backtest(cfg, repo, progress_callback=_on_backtest_progress)
+                    progress_bar.progress(1.0)
+                    progress_text.success("백테스트가 완료되었습니다.")
 
             bt_result = st.session_state.get("backtest_result")
             if bt_result:
                 bt_summary = bt_result.get("summary", {})
-                k1, k2, k3 = st.columns(3)
+                k1, k2, k3, k4, k5 = st.columns(5)
                 with k1:
                     st.metric("최종 자산", f"{float(bt_summary.get('final_equity', 0.0)):,.0f}")
                 with k2:
                     st.metric("리밸 횟수", int(bt_summary.get("rebalances", 0)))
                 with k3:
                     st.metric("총 비용", f"{float(bt_summary.get('total_costs', 0.0)):,.0f}")
+                with k4:
+                    st.metric("스킵 횟수", int(bt_summary.get("skipped_rebalances", 0)))
+                with k5:
+                    st.metric("소요시간(초)", f"{float(bt_summary.get('elapsed_seconds', 0.0)):.1f}")
 
                 skipped_rebalances = int(bt_summary.get("skipped_rebalances", 0) or 0)
                 if skipped_rebalances > 0:
@@ -2008,7 +2033,39 @@ with backtest_tab:
                                 st.metric("초과수익", f"{alpha * 100:.2f}%")
                 bt_log = bt_result.get("rebalance_log", pd.DataFrame())
                 if isinstance(bt_log, pd.DataFrame) and not bt_log.empty:
-                    st.dataframe(bt_log[["signal_date", "exec_date", "selected_count", "selected_tickers", "turnover_notional", "costs"]], width="stretch", hide_index=True)
+                    preferred_cols = [
+                        "signal_date",
+                        "exec_date",
+                        "selected_count",
+                        "selected_tickers",
+                        "turnover_notional",
+                        "costs",
+                        "skipped",
+                        "skip_reason",
+                    ]
+                    visible_cols = [col for col in preferred_cols if col in bt_log.columns]
+                    st.dataframe(bt_log[visible_cols], width="stretch", hide_index=True)
+
+                    if "diagnostics" in bt_log.columns:
+                        with st.expander("리밸런싱 진단 로그 보기"):
+                            diag_cols = [col for col in ["signal_date", "exec_date", "diagnostics"] if col in bt_log.columns]
+                            st.dataframe(bt_log[diag_cols], width="stretch", hide_index=True)
+
+                bt_run_log = bt_result.get("run_log", pd.DataFrame())
+                if isinstance(bt_run_log, pd.DataFrame) and not bt_run_log.empty:
+                    st.markdown("##### 실행 진행 로그")
+                    run_log_cols = [
+                        "signal_date",
+                        "exec_date",
+                        "stage",
+                        "status",
+                        "message",
+                        "universe_count",
+                        "filtered_count",
+                        "selected_count",
+                    ]
+                    visible_run_log_cols = [col for col in run_log_cols if col in bt_run_log.columns]
+                    st.dataframe(bt_run_log[visible_run_log_cols], width="stretch", hide_index=True)
 
 filtered = base.copy()
 missing_tickers: list[str] = []
