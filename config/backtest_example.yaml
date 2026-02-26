@@ -2,7 +2,8 @@ run:
   name: example_run
   start_date: "2021-01-01"
   end_date: "2021-12-31"
-  rebalance: M
+  rebalance: M  # supported: W(weekly), M(monthly), Y(yearly)
+  # yearly example: rebalance: Y
   anchor: month_end
   initial_capital: 100000000
 

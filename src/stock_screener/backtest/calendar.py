@@ -9,6 +9,11 @@ def _month_key(date_text: str) -> tuple[int, int]:
     return dt.year, dt.month
 
 
+def _year_key(date_text: str) -> int:
+    dt = datetime.strptime(date_text, "%Y-%m-%d")
+    return dt.year
+
+
 def make_rebalance_signal_dates(
     trading_dates: list[str],
     rule: str,
@@ -25,6 +30,15 @@ def make_rebalance_signal_dates(
         grouped: dict[tuple[int, int], list[str]] = {}
         for dt in trading_dates:
             grouped.setdefault(_month_key(dt), []).append(dt)
+        out: list[str] = []
+        for _, dates in sorted(grouped.items()):
+            out.append(dates[0] if anchor == "month_start" else dates[-1])
+        return out
+
+    if rule_norm in {"Y", "YEARLY", "YEAR"}:
+        grouped: dict[int, list[str]] = {}
+        for dt in trading_dates:
+            grouped.setdefault(_year_key(dt), []).append(dt)
         out: list[str] = []
         for _, dates in sorted(grouped.items()):
             out.append(dates[0] if anchor == "month_start" else dates[-1])
