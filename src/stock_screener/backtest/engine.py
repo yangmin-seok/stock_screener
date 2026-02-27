@@ -86,7 +86,7 @@ def run_backtest(
         _emit_progress(progress_callback, {'stage': 'init', 'processed': 0, 'total': 0, 'eta_seconds': 0.0, 'message': 'insufficient_trading_dates'})
         return {
             'equity_curve': pd.DataFrame(columns=['date', 'equity_close', 'return']),
-            'rebalance_log': pd.DataFrame(columns=['signal_date', 'exec_date', 'selected_count', 'turnover_notional', 'costs', 'skipped', 'skip_reason']),
+            'rebalance_log': pd.DataFrame(columns=['signal_date', 'exec_date', 'selected_count', 'entry_count', 'exit_count', 'entry_added', 'exit_removed', 'buffer_enabled', 'turnover_notional', 'costs', 'skipped', 'skip_reason']),
             'run_log': pd.DataFrame(columns=['signal_date', 'exec_date', 'stage', 'status', 'message', 'universe_count', 'filtered_count', 'selected_count']),
             'positions': pd.DataFrame(columns=['date', 'ticker', 'weight', 'shares', 'open_price']),
             'trades': pd.DataFrame(columns=['exec_date', 'ticker', 'delta_shares', 'price_open', 'notional', 'cost']),
@@ -127,6 +127,11 @@ def run_backtest(
                     'selected_tickers': '',
                     'diagnostics': str({'skip_reason': reason}),
                     'below_min_holdings': False,
+                    'buffer_enabled': False,
+                    'entry_count': 0,
+                    'exit_count': 0,
+                    'entry_added': 0,
+                    'exit_removed': 0,
                     'turnover_notional': 0.0,
                     'costs': 0.0,
                     'skipped': True,
@@ -167,7 +172,7 @@ def run_backtest(
             asof_elapsed_ms,
         )
         filtered, diagnostics = apply_filters(frame, filters_cfg)
-        selected, selection_meta = select_tickers(filtered, selection_cfg)
+        selected, selection_meta = select_tickers(filtered, selection_cfg, current_holdings=set(state.shares.keys()))
         run_records.append(
             {
                 'signal_date': signal_date,
@@ -212,6 +217,11 @@ def run_backtest(
                     'selected_tickers': ','.join(selected),
                     'diagnostics': str({'skip_reason': reason}),
                     'below_min_holdings': bool(selection_meta.get('below_min_holdings', False)),
+                    'buffer_enabled': bool(selection_meta.get('buffer_enabled', False)),
+                    'entry_count': int(selection_meta.get('entry_count', 0) or 0),
+                    'exit_count': int(selection_meta.get('exit_count', 0) or 0),
+                    'entry_added': int(selection_meta.get('entry_added', 0) or 0),
+                    'exit_removed': int(selection_meta.get('exit_removed', 0) or 0),
                     'turnover_notional': 0.0,
                     'costs': 0.0,
                     'skipped': True,
@@ -281,6 +291,11 @@ def run_backtest(
                 'selected_tickers': ','.join(selected),
                 'diagnostics': str(diagnostics),
                 'below_min_holdings': bool(selection_meta.get('below_min_holdings', False)),
+                'buffer_enabled': bool(selection_meta.get('buffer_enabled', False)),
+                'entry_count': int(selection_meta.get('entry_count', 0) or 0),
+                'exit_count': int(selection_meta.get('exit_count', 0) or 0),
+                'entry_added': int(selection_meta.get('entry_added', 0) or 0),
+                'exit_removed': int(selection_meta.get('exit_removed', 0) or 0),
                 'turnover_notional': rebalance_metrics['turnover_notional'],
                 'costs': rebalance_metrics['costs'],
                 'skipped': False,
