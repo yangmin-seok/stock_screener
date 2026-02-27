@@ -114,3 +114,42 @@ def test_get_price_panel_columns_sorted_and_nan_preserved(tmp_path):
     bbb_close = panel.loc[(panel["date"] == "2025-01-03") & (panel["ticker"] == "BBB"), "close"].iloc[0]
     assert math.isnan(float(bbb_open))
     assert math.isnan(float(bbb_close))
+
+
+def test_get_asof_frame_universe_filters_reduce_rows_and_match_conditions(tmp_path):
+    db = tmp_path / "x.db"
+    init_db(db)
+    repo = Repository(db)
+    _seed_basic_universe(repo)
+
+    repo.upsert_prices(
+        pd.DataFrame(
+            [
+                {"date": "2025-01-03", "ticker": "AAA", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000, "value": 100000},
+                {"date": "2025-01-04", "ticker": "AAA", "open": 101, "high": 102, "low": 100, "close": 101, "volume": 1100, "value": 111100},
+                {"date": "2025-01-03", "ticker": "BBB", "open": 50, "high": 51, "low": 49, "close": 50, "volume": 500, "value": 50000},
+                {"date": "2025-01-04", "ticker": "BBB", "open": 49, "high": 50, "low": 48, "close": 49, "volume": 500, "value": 49000},
+            ]
+        )
+    )
+    repo.upsert_cap(
+        pd.DataFrame(
+            [
+                {"date": "2025-01-04", "ticker": "AAA", "mcap": 5_000_000_000, "shares": 1_000_000, "volume": 1100, "value": 111100},
+                {"date": "2025-01-04", "ticker": "BBB", "mcap": 500_000_000, "shares": 1_000_000, "volume": 500, "value": 49000},
+            ]
+        )
+    )
+
+    base = repo.get_asof_frame("2025-01-04", window=2)
+    filtered = repo.get_asof_frame(
+        "2025-01-04",
+        window=2,
+        min_avg_value_20d=80_000,
+        min_mcap=1_000_000_000,
+    )
+
+    assert len(base) > len(filtered)
+    assert set(filtered["ticker"]) == {"AAA"}
+    assert (filtered["avg_value_20d"] >= 80_000).all()
+    assert (filtered["mcap"] >= 1_000_000_000).all()

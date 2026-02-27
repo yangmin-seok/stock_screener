@@ -45,6 +45,7 @@ def _preload_asof_frames(
     repo: Any,
     signal_dates: list[str],
     filters_cfg: dict[str, Any],
+    universe_cfg: dict[str, Any],
     preload_enabled: bool,
 ) -> dict[str, pd.DataFrame]:
     if not preload_enabled or not signal_dates or not hasattr(repo, 'get_asof_frames'):
@@ -52,7 +53,14 @@ def _preload_asof_frames(
 
     foreign_window = int(filters_cfg.get('foreign_window', 20))
     started_at = perf_counter()
-    frames = repo.get_asof_frames(signal_dates, foreign_window=foreign_window)
+    min_avg_value_20d = universe_cfg.get('min_avg_value_20d')
+    min_mcap = universe_cfg.get('min_mcap')
+    frames = repo.get_asof_frames(
+        signal_dates,
+        foreign_window=foreign_window,
+        min_avg_value_20d=min_avg_value_20d,
+        min_mcap=min_mcap,
+    )
     elapsed_ms = (perf_counter() - started_at) * 1000.0
     logger.info(
         'backtest.asof.preload signals=%d loaded=%d foreign_window=%d elapsed_ms=%.2f',
@@ -70,6 +78,7 @@ def run_backtest(
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, pd.DataFrame | dict[str, Any]]:
     run_cfg = _cfg_section(getattr(config, 'run', {}))
+    universe_cfg = _cfg_section(getattr(config, 'universe', {}))
     filters_cfg = _cfg_section(getattr(config, 'filters', {}))
     selection_cfg = _cfg_section(getattr(config, 'selection', {}))
     portfolio_cfg = _cfg_section(getattr(config, 'portfolio', {}))
@@ -98,7 +107,7 @@ def run_backtest(
     signal_dates = make_rebalance_signal_dates(trading_dates_all, rule=rule, anchor=anchor)
     total_signals = len(signal_dates)
     preload_enabled = bool(_pick_run_value(run_cfg, 'preload_asof_frames', default=True))
-    asof_frame_cache = _preload_asof_frames(repo, signal_dates, filters_cfg, preload_enabled)
+    asof_frame_cache = _preload_asof_frames(repo, signal_dates, filters_cfg, universe_cfg, preload_enabled)
 
     state = PortfolioState(cash=initial_capital)
     fee_bps = float(costs_cfg.get('fee_bps', costs_cfg.get('commission_bps', 0.0)) or 0.0)
@@ -162,7 +171,12 @@ def run_backtest(
         asof_source = 'preloaded'
         if frame is None:
             asof_source = 'query'
-            frame = repo.get_asof_frame(signal_date, foreign_window=int(filters_cfg.get('foreign_window', 20)))
+            frame = repo.get_asof_frame(
+                signal_date,
+                foreign_window=int(filters_cfg.get('foreign_window', 20)),
+                min_avg_value_20d=universe_cfg.get('min_avg_value_20d'),
+                min_mcap=universe_cfg.get('min_mcap'),
+            )
         asof_elapsed_ms = (perf_counter() - asof_started_at) * 1000.0
         logger.info(
             'backtest.asof.signal_date=%s source=%s rows=%d elapsed_ms=%.2f',
