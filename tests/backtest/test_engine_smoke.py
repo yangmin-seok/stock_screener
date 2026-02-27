@@ -25,7 +25,13 @@ class FakeRepo:
     def get_trading_dates(self) -> list[str]:
         return self.trading_dates
 
-    def get_asof_frame(self, dt: str, foreign_window: int = 20) -> pd.DataFrame:
+    def get_asof_frame(
+        self,
+        dt: str,
+        foreign_window: int = 20,
+        min_avg_value_20d: float | None = None,
+        min_mcap: float | None = None,
+    ) -> pd.DataFrame:
         self.asof_single_calls += 1
         base = {
             "ticker": ["AAA", "BBB"],
@@ -43,9 +49,23 @@ class FakeRepo:
             base["foreign_cum_value_20d"] = [500.0, 6000.0]
         return pd.DataFrame(base)
 
-    def get_asof_frames(self, dates: list[str], foreign_window: int = 20) -> dict[str, pd.DataFrame]:
+    def get_asof_frames(
+        self,
+        dates: list[str],
+        foreign_window: int = 20,
+        min_avg_value_20d: float | None = None,
+        min_mcap: float | None = None,
+    ) -> dict[str, pd.DataFrame]:
         self.asof_bulk_calls += 1
-        return {dt: self.get_asof_frame(dt, foreign_window=foreign_window) for dt in sorted(set(dates))}
+        return {
+            dt: self.get_asof_frame(
+                dt,
+                foreign_window=foreign_window,
+                min_avg_value_20d=min_avg_value_20d,
+                min_mcap=min_mcap,
+            )
+            for dt in sorted(set(dates))
+        }
 
     def get_price_panel(self, tickers: list[str], start_date: str, end_date: str) -> pd.DataFrame:
         rows: list[dict[str, object]] = []

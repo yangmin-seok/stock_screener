@@ -515,7 +515,14 @@ class Repository:
             fallback_rows = conn.execute(fallback_query).fetchall()
         return [str(row[0]) for row in fallback_rows]
 
-    def get_asof_frame(self, dt: str, window: int = 20, foreign_window: int | None = None) -> pd.DataFrame:
+    def get_asof_frame(
+        self,
+        dt: str,
+        window: int = 20,
+        foreign_window: int | None = None,
+        min_avg_value_20d: float | None = None,
+        min_mcap: float | None = None,
+    ) -> pd.DataFrame:
         foreign_window = window if foreign_window is None else foreign_window
         query = """
         WITH price_ranked AS (
@@ -609,6 +616,10 @@ class Repository:
         LEFT JOIN rolling r ON r.ticker = t.ticker
         LEFT JOIN fin_latest fin ON fin.ticker = t.ticker
         WHERE t.active_flag = 1
+          -- TODO(schema): ticker_master에 listed_from/listed_to를 도입해 dt 기준 active 판정으로 전환.
+          -- 현재는 active_flag만 사용하므로 과거 백테스트 구간에서 상장/상폐 시점 불일치 가능.
+          AND (:min_avg_value_20d IS NULL OR r.avg_value_20d >= :min_avg_value_20d)
+          AND (:min_mcap IS NULL OR pl.mcap >= :min_mcap)
         ORDER BY t.ticker
         """
         started_at = perf_counter()
@@ -616,7 +627,13 @@ class Repository:
             frame = pd.read_sql_query(
                 query,
                 conn,
-                params={"dt": dt, "window": window, "foreign_window": foreign_window},
+                params={
+                    "dt": dt,
+                    "window": window,
+                    "foreign_window": foreign_window,
+                    "min_avg_value_20d": min_avg_value_20d,
+                    "min_mcap": min_mcap,
+                },
             )
         elapsed_ms = (perf_counter() - started_at) * 1000.0
         logger.info(
@@ -629,7 +646,14 @@ class Repository:
         )
         return frame
 
-    def get_asof_frames(self, dates: list[str], window: int = 20, foreign_window: int | None = None) -> dict[str, pd.DataFrame]:
+    def get_asof_frames(
+        self,
+        dates: list[str],
+        window: int = 20,
+        foreign_window: int | None = None,
+        min_avg_value_20d: float | None = None,
+        min_mcap: float | None = None,
+    ) -> dict[str, pd.DataFrame]:
         if not dates:
             return {}
 
@@ -698,6 +722,8 @@ class Repository:
                 financials=financials,
                 window=window,
                 foreign_window=foreign_window,
+                min_avg_value_20d=min_avg_value_20d,
+                min_mcap=min_mcap,
             )
         elapsed_ms = (perf_counter() - started_at) * 1000.0
         logger.info(
@@ -717,6 +743,8 @@ class Repository:
         financials: pd.DataFrame,
         window: int,
         foreign_window: int,
+        min_avg_value_20d: float | None = None,
+        min_mcap: float | None = None,
     ) -> pd.DataFrame:
         if tickers.empty:
             return pd.DataFrame()
@@ -790,6 +818,12 @@ class Repository:
 
         frame["roe_proxy"] = frame["eps"] / frame["bps"]
         frame.loc[frame["bps"].isna() | (frame["bps"] == 0), "roe_proxy"] = pd.NA
+
+        if min_avg_value_20d is not None:
+            frame = frame[frame["avg_value_20d"].notna() & (frame["avg_value_20d"] >= float(min_avg_value_20d))]
+        if min_mcap is not None:
+            frame = frame[frame["mcap"].notna() & (frame["mcap"] >= float(min_mcap))]
+
         return frame.sort_values("ticker").reset_index(drop=True)
 
     def get_price_panel(self, tickers: list[str], start_date: str, end_date: str) -> pd.DataFrame:

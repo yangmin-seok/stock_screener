@@ -1880,6 +1880,26 @@ with backtest_tab:
                 f"누적 윈도우 {int(bt_foreign_window)}거래일 · 신호={bt_foreign_signal_type}"
             )
 
+            uv_col1, uv_col2 = st.columns(2)
+            with uv_col1:
+                bt_min_avg_value_eok = st.number_input(
+                    "유니버스 최소 평균거래대금(20D, 억원)",
+                    min_value=0.0,
+                    value=0.0,
+                    step=50.0,
+                    format="%.0f",
+                    key="bt_min_avg_value_eok",
+                )
+            with uv_col2:
+                bt_min_mcap_eok = st.number_input(
+                    "유니버스 최소 시총(억원)",
+                    min_value=0.0,
+                    value=0.0,
+                    step=500.0,
+                    format="%.0f",
+                    key="bt_min_mcap_eok",
+                )
+
             cs_col1, cs_col2, cs_col3 = st.columns(3)
             with cs_col1:
                 bt_fee_bps = st.number_input("수수료(bps)", min_value=0.0, value=5.0, step=1.0, key="bt_fee_bps")
@@ -1925,6 +1945,12 @@ with backtest_tab:
                             }
                         )
 
+                    universe_cfg: dict[str, Any] = {}
+                    if float(bt_min_avg_value_eok) > 0:
+                        universe_cfg["min_avg_value_20d"] = float(bt_min_avg_value_eok) * 100_000_000.0
+                    if float(bt_min_mcap_eok) > 0:
+                        universe_cfg["min_mcap"] = float(bt_min_mcap_eok) * 100_000_000.0
+
                     cfg = BacktestConfig(
                         run={
                             "name": "ui_backtest",
@@ -1933,7 +1959,7 @@ with backtest_tab:
                             "rebalance": bt_rebalance,
                             "initial_capital": 100000000.0,
                         },
-                        universe={},
+                        universe=universe_cfg,
                         filters=filters_cfg,
                         selection=selection_cfg,
                         portfolio={"weighting": "equal"},
@@ -1982,6 +2008,11 @@ with backtest_tab:
                     st.metric("스킵 횟수", int(bt_summary.get("skipped_rebalances", 0)))
                 with k5:
                     st.metric("소요시간(초)", f"{float(bt_summary.get('elapsed_seconds', 0.0)):.1f}")
+
+                st.info(
+                    "유니버스 active 판정은 현재 ticker_master.active_flag만 사용 중입니다. "
+                    "향후 listed_from/listed_to 도입 시 dt 기준 상장/상폐 유효기간 판정으로 전환 예정입니다."
+                )
 
                 skipped_rebalances = int(bt_summary.get("skipped_rebalances", 0) or 0)
                 if skipped_rebalances > 0:
