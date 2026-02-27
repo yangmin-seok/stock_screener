@@ -1868,6 +1868,12 @@ with backtest_tab:
             with fg_col5:
                 bt_cap_n = st.number_input("상위 N (cap_n)", min_value=1, value=20, step=1, key="bt_cap_n")
 
+            tg_col1, tg_col2 = st.columns(2)
+            with tg_col1:
+                bt_trend_enabled = st.checkbox("추세 필터 사용", value=False, key="bt_trend_enabled")
+            with tg_col2:
+                st.caption("추세 필터: ret_60d > 0 AND close > sma_200")
+
             bt_foreign_min_won = float(bt_foreign_min_eok) * 100_000_000.0
             foreign_signal_options = {
                 "절대금액(기존)": {"normalize": "none", "sort_by": "foreign_cum_value_20d"},
@@ -1924,6 +1930,21 @@ with backtest_tab:
                             "value": float(bt_foreign_min_won),
                             "unit": "value",
                             "normalize": selected_foreign_signal["normalize"],
+                            "missing_policy": "drop",
+                        }
+                    if bt_trend_enabled:
+                        filters_cfg["ret_60d"] = {
+                            "enabled": True,
+                            "field": "ret_60d",
+                            "op": "gte",
+                            "value": 0.0,
+                            "missing_policy": "drop",
+                        }
+                        filters_cfg["sma_200_gap"] = {
+                            "enabled": True,
+                            "field": "sma_200_gap",
+                            "op": "gte",
+                            "value": 0.0,
                             "missing_policy": "drop",
                         }
 
@@ -1997,7 +2018,7 @@ with backtest_tab:
             bt_result = st.session_state.get("backtest_result")
             if bt_result:
                 bt_summary = bt_result.get("summary", {})
-                k1, k2, k3, k4, k5 = st.columns(5)
+                k1, k2, k3, k4, k5, k6 = st.columns(6)
                 with k1:
                     st.metric("최종 자산", f"{float(bt_summary.get('final_equity', 0.0)):,.0f}")
                 with k2:
@@ -2008,6 +2029,8 @@ with backtest_tab:
                     st.metric("스킵 횟수", int(bt_summary.get("skipped_rebalances", 0)))
                 with k5:
                     st.metric("소요시간(초)", f"{float(bt_summary.get('elapsed_seconds', 0.0)):.1f}")
+                with k6:
+                    st.metric("추세 필터", "ON" if bool(bt_summary.get("trend_filter_enabled", False)) else "OFF")
 
                 st.info(
                     "유니버스 active 판정은 현재 ticker_master.active_flag만 사용 중입니다. "

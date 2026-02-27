@@ -15,6 +15,8 @@ def _frame() -> pd.DataFrame:
                 "foreign_cum_volume_20d": 100.0,
                 "foreign_pressure_by_avg_value": 0.10,
                 "foreign_pressure_by_mcap": 0.02,
+                "ret_60d": 0.12,
+                "sma_200_gap": 0.08,
             },
             {
                 "ticker": "BBB",
@@ -25,6 +27,8 @@ def _frame() -> pd.DataFrame:
                 "foreign_cum_volume_20d": 50.0,
                 "foreign_pressure_by_avg_value": 0.01,
                 "foreign_pressure_by_mcap": 0.005,
+                "ret_60d": -0.04,
+                "sma_200_gap": -0.02,
             },
             {
                 "ticker": "CCC",
@@ -35,6 +39,8 @@ def _frame() -> pd.DataFrame:
                 "foreign_cum_volume_20d": None,
                 "foreign_pressure_by_avg_value": None,
                 "foreign_pressure_by_mcap": None,
+                "ret_60d": None,
+                "sma_200_gap": None,
             },
         ]
     )
@@ -110,3 +116,25 @@ def test_apply_filters_foreign_mapping_normalized_column():
 
     filtered, _ = apply_filters(_frame(), filters)
     assert filtered["ticker"].tolist() == ["AAA"]
+
+
+def test_apply_filters_trend_gte_conditions():
+    filters = {
+        "ret_60d": {"enabled": True, "field": "ret_60d", "op": "gte", "value": 0.0},
+        "sma_200_gap": {"enabled": True, "field": "sma_200_gap", "op": "gte", "value": 0.0},
+    }
+
+    filtered, diagnostics = apply_filters(_frame(), filters)
+
+    assert filtered["ticker"].tolist() == ["AAA"]
+    assert [d["filter"] for d in diagnostics] == ["ret_60d", "sma_200_gap"]
+
+
+def test_apply_filters_trend_range_condition():
+    filters = {
+        "ret_60d": {"enabled": True, "field": "ret_60d", "op": "range", "min": -0.05, "max": 0.0, "inclusive": True}
+    }
+
+    filtered, _ = apply_filters(_frame(), filters)
+
+    assert filtered["ticker"].tolist() == ["BBB"]

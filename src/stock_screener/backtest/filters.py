@@ -83,6 +83,7 @@ def _apply_condition(series: pd.Series, spec: dict[str, Any]) -> pd.Series:
 
 def _validate_required_columns(df: pd.DataFrame, filters: Mapping[str, Any]) -> None:
     missing_messages: list[str] = []
+    trend_fields = {"ret_60d", "sma_200_gap"}
 
     for filter_name, raw_spec in filters.items():
         if not isinstance(raw_spec, Mapping) and not is_dataclass(raw_spec):
@@ -92,6 +93,13 @@ def _validate_required_columns(df: pd.DataFrame, filters: Mapping[str, Any]) -> 
             continue
 
         field = str(spec.get("field") or filter_name)
+        if field in trend_fields:
+            if field not in df.columns:
+                missing_messages.append(
+                    f"추세 필터 컬럼이 데이터프레임에 없습니다: filter={filter_name}, field={field}"
+                )
+            continue
+
         if field != "foreign_cum":
             continue
 
