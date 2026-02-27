@@ -77,6 +77,9 @@ def test_get_asof_frame_foreign_window_matches_manual_sum_and_keeps_nan(tmp_path
     frame = repo.get_asof_frame("2025-01-04", foreign_window=3)
     aaa = frame.loc[frame["ticker"] == "AAA"].iloc[0]
 
+    assert "ret_60d" in frame.columns
+    assert "sma_200" in frame.columns
+    assert "sma_200_gap" in frame.columns
     assert aaa["foreign_cum_volume_20d"] == 12
     assert aaa["foreign_cum_value_20d"] == 12000
     assert math.isnan(float(aaa["foreign_net_buy_volume"]))

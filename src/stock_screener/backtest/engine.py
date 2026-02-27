@@ -91,6 +91,12 @@ def run_backtest(
         raise ValueError('run.start/start_date and run.end/end_date are required')
 
     trading_dates_all = [d for d in repo.get_trading_dates() if start <= d <= end]
+    foreign_filter_enabled = bool(_cfg_section(filters_cfg.get('foreign_cum')).get('enabled', False))
+    trend_filter_enabled = any(
+        bool(_cfg_section(filters_cfg.get(name)).get('enabled', False))
+        for name in ('ret_60d', 'sma_200_gap')
+    )
+
     if len(trading_dates_all) < 2:
         _emit_progress(progress_callback, {'stage': 'init', 'processed': 0, 'total': 0, 'eta_seconds': 0.0, 'message': 'insufficient_trading_dates'})
         return {
@@ -99,7 +105,7 @@ def run_backtest(
             'run_log': pd.DataFrame(columns=['signal_date', 'exec_date', 'stage', 'status', 'message', 'universe_count', 'filtered_count', 'selected_count']),
             'positions': pd.DataFrame(columns=['date', 'ticker', 'weight', 'shares', 'open_price']),
             'trades': pd.DataFrame(columns=['exec_date', 'ticker', 'delta_shares', 'price_open', 'notional', 'cost']),
-            'summary': {'rebalances': 0, 'skipped_rebalances': 0, 'skipped_rebalance_reasons': {}, 'final_equity': initial_capital, 'turnover': 0.0, 'number_of_trades': 0, 'total_costs': 0.0, 'elapsed_seconds': 0.0, 'signals_total': 0},
+            'summary': {'rebalances': 0, 'skipped_rebalances': 0, 'skipped_rebalance_reasons': {}, 'final_equity': initial_capital, 'turnover': 0.0, 'number_of_trades': 0, 'total_costs': 0.0, 'elapsed_seconds': 0.0, 'signals_total': 0, 'foreign_filter_enabled': foreign_filter_enabled, 'trend_filter_enabled': trend_filter_enabled},
         }
 
     rule = _pick_run_value(run_cfg, 'rebalance', 'rebalance_rule', default='M')
@@ -360,6 +366,8 @@ def run_backtest(
         'number_of_trades': int(len(trades)),
         'elapsed_seconds': float(elapsed_seconds),
         'signals_total': int(total_signals),
+        'foreign_filter_enabled': foreign_filter_enabled,
+        'trend_filter_enabled': trend_filter_enabled,
     }
 
     _emit_progress(progress_callback, {'stage': 'done', 'processed': total_signals, 'total': total_signals, 'eta_seconds': 0.0, 'message': 'completed'})

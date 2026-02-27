@@ -525,7 +525,7 @@ class Repository:
     ) -> pd.DataFrame:
         foreign_window = window if foreign_window is None else foreign_window
         query = """
-        WITH price_ranked AS (
+        WITH price_enriched AS (
             SELECT
                 p.date,
                 p.ticker,
@@ -535,14 +535,44 @@ class Repository:
                 COALESCE(c.value, p.value) AS value,
                 flow.foreign_net_buy_volume,
                 flow.foreign_net_buy_value,
-                ROW_NUMBER() OVER (PARTITION BY p.ticker ORDER BY p.date DESC) AS rn
+                AVG(p.close) OVER (
+                    PARTITION BY p.ticker
+                    ORDER BY p.date
+                    ROWS BETWEEN 199 PRECEDING AND CURRENT ROW
+                ) AS sma_200,
+                LAG(p.close, 60) OVER (
+                    PARTITION BY p.ticker
+                    ORDER BY p.date
+                ) AS close_lag_60d
             FROM prices_daily p
             LEFT JOIN cap_daily c ON c.date = p.date AND c.ticker = p.ticker
             LEFT JOIN investor_flow_daily flow ON flow.date = p.date AND flow.ticker = p.ticker
             WHERE p.date <= :dt
         ),
+        price_ranked AS (
+            SELECT
+                date,
+                ticker,
+                open,
+                close,
+                mcap,
+                value,
+                foreign_net_buy_volume,
+                foreign_net_buy_value,
+                sma_200,
+                CASE
+                    WHEN close_lag_60d IS NULL OR close_lag_60d = 0 THEN NULL
+                    ELSE (close / close_lag_60d) - 1
+                END AS ret_60d,
+                CASE
+                    WHEN sma_200 IS NULL OR sma_200 = 0 THEN NULL
+                    ELSE (close / sma_200) - 1
+                END AS sma_200_gap,
+                ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) AS rn
+            FROM price_enriched
+        ),
         price_latest AS (
-            SELECT ticker, date, open, close, mcap, value, foreign_net_buy_volume, foreign_net_buy_value
+            SELECT ticker, date, open, close, mcap, value, foreign_net_buy_volume, foreign_net_buy_value, sma_200, ret_60d, sma_200_gap
             FROM price_ranked
             WHERE rn = 1
         ),
@@ -592,6 +622,9 @@ class Repository:
             pl.value,
             pl.foreign_net_buy_volume,
             pl.foreign_net_buy_value,
+            pl.sma_200,
+            pl.ret_60d,
+            pl.sma_200_gap,
             r.avg_value_20d,
             r.foreign_cum_volume_20d,
             r.foreign_cum_value_20d,
@@ -676,7 +709,16 @@ class Repository:
             c.mcap,
             COALESCE(c.value, p.value) AS value,
             flow.foreign_net_buy_volume,
-            flow.foreign_net_buy_value
+            flow.foreign_net_buy_value,
+            AVG(p.close) OVER (
+                PARTITION BY p.ticker
+                ORDER BY p.date
+                ROWS BETWEEN 199 PRECEDING AND CURRENT ROW
+            ) AS sma_200,
+            LAG(p.close, 60) OVER (
+                PARTITION BY p.ticker
+                ORDER BY p.date
+            ) AS close_lag_60d
         FROM prices_daily p
         LEFT JOIN cap_daily c ON c.date = p.date AND c.ticker = p.ticker
         LEFT JOIN investor_flow_daily flow ON flow.date = p.date AND flow.ticker = p.ticker
@@ -709,6 +751,10 @@ class Repository:
 
         if not prices.empty:
             prices = prices.sort_values(["ticker", "date"], kind="mergesort")
+            prices["ret_60d"] = prices["close"] / prices["close_lag_60d"] - 1
+            prices.loc[prices["close_lag_60d"].isna() | (prices["close_lag_60d"] == 0), "ret_60d"] = pd.NA
+            prices["sma_200_gap"] = prices["close"] / prices["sma_200"] - 1
+            prices.loc[prices["sma_200"].isna() | (prices["sma_200"] == 0), "sma_200_gap"] = pd.NA
         if not financials.empty:
             financials["is_correction"] = financials["is_correction"].fillna(0)
             financials["source_priority"] = financials["source_priority"].fillna(0)
@@ -750,12 +796,12 @@ class Repository:
             return pd.DataFrame()
 
         if prices.empty:
-            price_latest = pd.DataFrame(columns=["ticker", "date", "open", "close", "mcap", "value", "foreign_net_buy_volume", "foreign_net_buy_value"])
+            price_latest = pd.DataFrame(columns=["ticker", "date", "open", "close", "mcap", "value", "foreign_net_buy_volume", "foreign_net_buy_value", "sma_200", "ret_60d", "sma_200_gap"])
             rolling = pd.DataFrame(columns=["ticker", "avg_value_20d", "foreign_cum_volume_20d", "foreign_cum_value_20d"])
         else:
             prices_asof = prices[prices["date"] <= dt]
             if prices_asof.empty:
-                price_latest = pd.DataFrame(columns=["ticker", "date", "open", "close", "mcap", "value", "foreign_net_buy_volume", "foreign_net_buy_value"])
+                price_latest = pd.DataFrame(columns=["ticker", "date", "open", "close", "mcap", "value", "foreign_net_buy_volume", "foreign_net_buy_value", "sma_200", "ret_60d", "sma_200_gap"])
                 rolling = pd.DataFrame(columns=["ticker", "avg_value_20d", "foreign_cum_volume_20d", "foreign_cum_value_20d"])
             else:
                 price_latest = prices_asof.groupby("ticker", as_index=False).tail(1)
