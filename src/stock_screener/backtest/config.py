@@ -89,6 +89,22 @@ def _parse_scalar(raw: str) -> Any:
     return text
 
 
+def _strip_inline_comment(value: str) -> str:
+    in_single = False
+    in_double = False
+
+    for idx, ch in enumerate(value):
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            continue
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            continue
+        if ch == "#" and not in_single and not in_double:
+            return value[:idx].rstrip()
+    return value.rstrip()
+
+
 def _load_simple_yaml(path: Path) -> dict[str, Any]:
     root: dict[str, Any] = {}
     stack: list[tuple[int, dict[str, Any]]] = [(-1, root)]
@@ -116,7 +132,7 @@ def _load_simple_yaml(path: Path) -> dict[str, Any]:
             stack.append((indent, node))
             continue
 
-        current[key] = _parse_scalar(value)
+        current[key] = _parse_scalar(_strip_inline_comment(value))
 
     return root
 
