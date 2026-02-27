@@ -524,6 +524,7 @@ class Repository:
                 p.ticker,
                 p.open,
                 p.close,
+                c.mcap,
                 COALESCE(c.value, p.value) AS value,
                 flow.foreign_net_buy_volume,
                 flow.foreign_net_buy_value,
@@ -534,7 +535,7 @@ class Repository:
             WHERE p.date <= :dt
         ),
         price_latest AS (
-            SELECT ticker, date, open, close, value, foreign_net_buy_volume, foreign_net_buy_value
+            SELECT ticker, date, open, close, mcap, value, foreign_net_buy_volume, foreign_net_buy_value
             FROM price_ranked
             WHERE rn = 1
         ),
@@ -580,12 +581,21 @@ class Repository:
             pl.date,
             pl.open,
             pl.close,
+            pl.mcap,
             pl.value,
             pl.foreign_net_buy_volume,
             pl.foreign_net_buy_value,
             r.avg_value_20d,
             r.foreign_cum_volume_20d,
             r.foreign_cum_value_20d,
+            CASE
+                WHEN r.avg_value_20d IS NULL OR r.avg_value_20d = 0 OR r.foreign_cum_value_20d IS NULL THEN NULL
+                ELSE r.foreign_cum_value_20d / r.avg_value_20d
+            END AS foreign_pressure_by_avg_value,
+            CASE
+                WHEN pl.mcap IS NULL OR pl.mcap = 0 OR r.foreign_cum_value_20d IS NULL THEN NULL
+                ELSE r.foreign_cum_value_20d / pl.mcap
+            END AS foreign_pressure_by_mcap,
             fin.eps,
             fin.bps,
             fin.fiscal_period,
@@ -639,6 +649,7 @@ class Repository:
             p.ticker,
             p.open,
             p.close,
+            c.mcap,
             COALESCE(c.value, p.value) AS value,
             flow.foreign_net_buy_volume,
             flow.foreign_net_buy_value
@@ -711,12 +722,12 @@ class Repository:
             return pd.DataFrame()
 
         if prices.empty:
-            price_latest = pd.DataFrame(columns=["ticker", "date", "open", "close", "value", "foreign_net_buy_volume", "foreign_net_buy_value"])
+            price_latest = pd.DataFrame(columns=["ticker", "date", "open", "close", "mcap", "value", "foreign_net_buy_volume", "foreign_net_buy_value"])
             rolling = pd.DataFrame(columns=["ticker", "avg_value_20d", "foreign_cum_volume_20d", "foreign_cum_value_20d"])
         else:
             prices_asof = prices[prices["date"] <= dt]
             if prices_asof.empty:
-                price_latest = pd.DataFrame(columns=["ticker", "date", "open", "close", "value", "foreign_net_buy_volume", "foreign_net_buy_value"])
+                price_latest = pd.DataFrame(columns=["ticker", "date", "open", "close", "mcap", "value", "foreign_net_buy_volume", "foreign_net_buy_value"])
                 rolling = pd.DataFrame(columns=["ticker", "avg_value_20d", "foreign_cum_volume_20d", "foreign_cum_value_20d"])
             else:
                 price_latest = prices_asof.groupby("ticker", as_index=False).tail(1)
@@ -757,6 +768,26 @@ class Repository:
         frame = frame.merge(rolling, on="ticker", how="left")
         frame = frame.merge(fin_latest, on="ticker", how="left")
         frame = frame.rename(columns={"source": "financial_source"})
+        frame["foreign_pressure_by_avg_value"] = pd.NA
+        avg_value_mask = (
+            frame["foreign_cum_value_20d"].notna()
+            & frame["avg_value_20d"].notna()
+            & (frame["avg_value_20d"] != 0)
+        )
+        frame.loc[avg_value_mask, "foreign_pressure_by_avg_value"] = (
+            frame.loc[avg_value_mask, "foreign_cum_value_20d"] / frame.loc[avg_value_mask, "avg_value_20d"]
+        )
+
+        frame["foreign_pressure_by_mcap"] = pd.NA
+        mcap_mask = (
+            frame["foreign_cum_value_20d"].notna()
+            & frame["mcap"].notna()
+            & (frame["mcap"] != 0)
+        )
+        frame.loc[mcap_mask, "foreign_pressure_by_mcap"] = (
+            frame.loc[mcap_mask, "foreign_cum_value_20d"] / frame.loc[mcap_mask, "mcap"]
+        )
+
         frame["roe_proxy"] = frame["eps"] / frame["bps"]
         frame.loc[frame["bps"].isna() | (frame["bps"] == 0), "roe_proxy"] = pd.NA
         return frame.sort_values("ticker").reset_index(drop=True)

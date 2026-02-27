@@ -81,10 +81,40 @@ def _apply_condition(series: pd.Series, spec: dict[str, Any]) -> pd.Series:
     raise ValueError(f"Unsupported op: {op}")
 
 
+def _validate_required_columns(df: pd.DataFrame, filters: Mapping[str, Any]) -> None:
+    missing_messages: list[str] = []
+
+    for filter_name, raw_spec in filters.items():
+        if not isinstance(raw_spec, Mapping) and not is_dataclass(raw_spec):
+            continue
+        spec = _spec_to_dict(raw_spec)
+        if not bool(spec.get("enabled", False)):
+            continue
+
+        field = str(spec.get("field") or filter_name)
+        if field != "foreign_cum":
+            continue
+
+        expected_column = _resolve_foreign_column(spec)
+        if expected_column in df.columns:
+            continue
+
+        available_foreign_cols = sorted(c for c in df.columns if c.startswith("foreign_"))
+        missing_messages.append(
+            "외국인 필터 컬럼이 데이터프레임에 없습니다: "
+            f"filter={filter_name}, normalize={spec.get('normalize', 'none')}, expected={expected_column}, "
+            f"available_foreign_columns={available_foreign_cols}"
+        )
+
+    if missing_messages:
+        raise KeyError("; ".join(missing_messages))
+
+
 def apply_filters(
     df: pd.DataFrame,
     filters: Mapping[str, Any],
 ) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+    _validate_required_columns(df, filters)
     filtered = df.copy()
     diagnostics: list[dict[str, Any]] = []
 

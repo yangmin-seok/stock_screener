@@ -1836,10 +1836,17 @@ with backtest_tab:
                     help="티커 입력 시 DB 수집 데이터 사용, KOSPI 입력 시 pykrx 지수(1001)를 조회합니다.",
                 )
 
-            fg_col1, fg_col2, fg_col3, fg_col4 = st.columns(4)
+            fg_col1, fg_col2, fg_col3, fg_col4, fg_col5 = st.columns(5)
             with fg_col1:
                 bt_foreign_enabled = st.checkbox("외국인 누적금액 필터 사용", value=True, key="bt_foreign_enabled")
             with fg_col2:
+                bt_foreign_signal_type = st.selectbox(
+                    "외국인 신호 타입",
+                    ["절대금액(기존)", "거래대금 대비", "시총 대비"],
+                    index=0,
+                    key="bt_foreign_signal_type",
+                )
+            with fg_col3:
                 bt_foreign_min_eok = st.number_input(
                     "외국인 20D 누적금액 최소(억원)",
                     min_value=0.0,
@@ -1849,7 +1856,7 @@ with backtest_tab:
                     key="bt_foreign_min_eok",
                     help="예: 1000 = 1,000억원 (KRW 100,000,000,000)",
                 )
-            with fg_col3:
+            with fg_col4:
                 bt_foreign_window = st.number_input(
                     "누적 윈도우(거래일)",
                     min_value=1,
@@ -1858,13 +1865,19 @@ with backtest_tab:
                     key="bt_foreign_window",
                     help="최근 N 거래일의 외국인 순매수 금액을 합산해 필터/정렬 기준으로 사용합니다.",
                 )
-            with fg_col4:
+            with fg_col5:
                 bt_cap_n = st.number_input("상위 N (cap_n)", min_value=1, value=20, step=1, key="bt_cap_n")
 
             bt_foreign_min_won = float(bt_foreign_min_eok) * 100_000_000.0
+            foreign_signal_options = {
+                "절대금액(기존)": {"normalize": "none", "sort_by": "foreign_cum_value_20d"},
+                "거래대금 대비": {"normalize": "by_avg_value", "sort_by": "foreign_pressure_by_avg_value"},
+                "시총 대비": {"normalize": "by_mcap", "sort_by": "foreign_pressure_by_mcap"},
+            }
+            selected_foreign_signal = foreign_signal_options[bt_foreign_signal_type]
             st.caption(
                 f"외국인 최소 기준: {bt_foreign_min_eok:,.0f}억원 (약 {bt_foreign_min_won:,.0f}원) · "
-                f"누적 윈도우 {int(bt_foreign_window)}거래일"
+                f"누적 윈도우 {int(bt_foreign_window)}거래일 · 신호={bt_foreign_signal_type}"
             )
 
             cs_col1, cs_col2, cs_col3 = st.columns(3)
@@ -1890,7 +1903,7 @@ with backtest_tab:
                             "op": "gte",
                             "value": float(bt_foreign_min_won),
                             "unit": "value",
-                            "normalize": "none",
+                            "normalize": selected_foreign_signal["normalize"],
                             "missing_policy": "drop",
                         }
 
@@ -1899,7 +1912,7 @@ with backtest_tab:
                         selection_cfg.update(
                             {
                                 "cap_n": int(bt_cap_n),
-                                "sort_by": "foreign_cum_value_20d",
+                                "sort_by": selected_foreign_signal["sort_by"],
                                 "sort_direction": "desc",
                                 "min_holdings": 1,
                             }
