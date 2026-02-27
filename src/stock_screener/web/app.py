@@ -1907,7 +1907,14 @@ with backtest_tab:
                             "missing_policy": "drop",
                         }
 
-                    selection_cfg: dict[str, Any] = {"mode": bt_selection_mode, "empty_selection_policy": "cash"}
+                    selection_cfg: dict[str, Any] = {
+                        "mode": bt_selection_mode,
+                        "empty_selection_policy": "cash",
+                        "entry_rank": None,
+                        "exit_rank": None,
+                        "entry_pct": None,
+                        "exit_pct": None,
+                    }
                     if bt_selection_mode == "cap_n":
                         selection_cfg.update(
                             {
