@@ -6,6 +6,7 @@ from pathlib import Path
 
 from stock_screener.backtest.config import BacktestConfig, load_backtest_config
 from stock_screener.backtest.engine import run_backtest
+from stock_screener.backtest.optimize import run_parameter_sweep
 from stock_screener.backtest.report import compute_summary, save_backtest_outputs
 from stock_screener.storage.db import init_db
 from stock_screener.storage.repository import Repository
@@ -20,6 +21,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--save-positions', action='store_true', default=False, help='Save positions.csv')
     parser.add_argument('--save-daily', action='store_true', default=False, help='Save equity_curve.csv')
     parser.add_argument('--verbose', action='store_true', default=False)
+    parser.add_argument('--sweep', action='store_true', default=False, help='Run parameter grid sweep mode')
+    parser.add_argument('--sweep-rebalance', default='W,M,Y', help='Comma-separated rebalance values for sweep')
+    parser.add_argument('--sweep-foreign-window', default='5,10,20,60', help='Comma-separated foreign window values for sweep')
+    parser.add_argument('--sweep-cap-n', default='10,20,30', help='Comma-separated cap_n values for sweep')
+    parser.add_argument('--train-ratio', type=float, default=None, help='In-sample split ratio (0~1) for sweep')
+    parser.add_argument('--split-date', default=None, help='In-sample end date (YYYY-MM-DD) for sweep')
+    parser.add_argument('--sweep-csv', default=None, help='Output CSV path for sweep results')
     return parser
 
 
@@ -36,9 +44,33 @@ def main() -> None:
 
     init_db(db_path)
     repo = Repository(db_path)
-    result = run_backtest(config, repo)
-
     config_dict = _config_dict(config)
+
+    if args.sweep:
+        rebalance_values = [v.strip() for v in str(args.sweep_rebalance).split(',') if v.strip()]
+        foreign_window_values = [int(v.strip()) for v in str(args.sweep_foreign_window).split(',') if v.strip()]
+        cap_n_values = [int(v.strip()) for v in str(args.sweep_cap_n).split(',') if v.strip()]
+
+        sweep_df = run_parameter_sweep(
+            config,
+            repo,
+            rebalance_values=rebalance_values,
+            foreign_window_values=foreign_window_values,
+            cap_n_values=cap_n_values,
+            train_ratio=args.train_ratio,
+            split_date=args.split_date,
+        )
+        output_cfg = config_dict.get('output', {})
+        out_dir = Path(args.out_dir or output_cfg.get('dir', 'runs/backtests'))
+        out_dir.mkdir(parents=True, exist_ok=True)
+        csv_path = Path(args.sweep_csv) if args.sweep_csv else out_dir / f"{config_dict.get('run', {}).get('name', 'backtest')}_sweep.csv"
+        sweep_df.to_csv(csv_path, index=False)
+        print(f'Sweep run complete (db_path={db_path}, combinations={len(sweep_df)}, csv={csv_path})')
+        if args.verbose:
+            print(sweep_df)
+        return
+
+    result = run_backtest(config, repo)
     initial_capital = float(config_dict.get('run', {}).get('initial_capital', 1_000_000))
     result['summary'] = compute_summary(result, initial_capital=initial_capital)
 

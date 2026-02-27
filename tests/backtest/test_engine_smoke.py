@@ -2,6 +2,7 @@ import pandas as pd
 
 from stock_screener.backtest.config import BacktestConfig
 from stock_screener.backtest.engine import run_backtest
+from stock_screener.backtest.optimize import run_parameter_sweep
 
 
 class FakeRepo:
@@ -381,3 +382,30 @@ def test_engine_preloaded_asof_frames_keep_result_equivalence_and_reduce_single_
     assert repo_preloaded.asof_single_calls == len(result_preloaded["rebalance_log"])
     assert repo_query.asof_bulk_calls == 0
     assert repo_query.asof_single_calls == len(result_query["rebalance_log"])
+
+
+def test_parameter_sweep_smoke_returns_oos_columns_and_expected_rows():
+    repo = FakeRepo()
+    config = _cfg()
+
+    sweep = run_parameter_sweep(
+        config,
+        repo,
+        rebalance_values=["W", "M"],
+        foreign_window_values=[5, 20],
+        cap_n_values=[1, 2],
+        train_ratio=0.6,
+    )
+
+    assert len(sweep) == 8
+    assert {
+        "final_equity",
+        "cagr",
+        "mdd",
+        "turnover",
+        "total_costs",
+        "is_final_equity",
+        "oos_final_equity",
+        "oos_cagr",
+    }.issubset(sweep.columns)
+    assert sweep["oos_final_equity"].notna().all()
