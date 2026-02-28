@@ -120,6 +120,7 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("volatility_max_custom", "float", 0.0),
     FilterSpec("foreign_buy_filter_mode", "str", "Any"),
     FilterSpec("foreign_buy_metric", "str", "foreign_net_buy_value_20d"),
+    FilterSpec("foreign_buy_window", "int", 20),
     FilterSpec("foreign_buy_bucket", "str", "전체"),
     FilterSpec("foreign_buy_min_custom", "float", 0.0),
     FilterSpec("foreign_buy_max_custom", "float", 0.0),
@@ -1133,6 +1134,8 @@ if st.session_state.get("momentum_metric") not in MOMENTUM_METRICS:
     st.session_state.momentum_metric = "ret_3m"
 if st.session_state.get("foreign_buy_metric") not in FOREIGN_BUY_METRICS:
     st.session_state.foreign_buy_metric = "foreign_net_buy_value_20d"
+if int(st.session_state.get("foreign_buy_window", 20)) < 1:
+    st.session_state.foreign_buy_window = 20
 
 _poll_background_job()
 
@@ -1243,6 +1246,29 @@ if not asof:
     st.stop()
 
 base = repo.load_snapshot(asof)
+foreign_buy_window = max(int(st.session_state.get("foreign_buy_window", 20)), 1)
+try:
+    foreign_window_frame = repo.get_asof_frame(asof, window=20, foreign_window=foreign_buy_window)
+except Exception:
+    foreign_window_frame = pd.DataFrame()
+
+if not foreign_window_frame.empty:
+    foreign_window_cols = [
+        "ticker",
+        "foreign_cum_volume_20d",
+        "foreign_cum_value_20d",
+        "foreign_pressure_by_mcap",
+    ]
+    base = base.merge(
+        foreign_window_frame[foreign_window_cols],
+        on="ticker",
+        how="left",
+        suffixes=("", "_windowed"),
+    )
+    base["foreign_net_buy_volume_20d"] = base["foreign_cum_volume_20d"]
+    base["foreign_net_buy_value_20d"] = base["foreign_cum_value_20d"]
+    base["foreign_net_buy_value_20d_mcap_ratio"] = base["foreign_pressure_by_mcap"] * 100.0
+
 if "foreign_net_buy_value_20d_mcap_ratio" not in base.columns:
     base["foreign_net_buy_value_20d_mcap_ratio"] = pd.NA
 mcap_ratio_mask = (
@@ -1741,6 +1767,14 @@ with technical_tab:
     )
 
     st.markdown("##### 외국인")
+    foreign_buy_window = st.number_input(
+        "외국인 누적 윈도우(거래일)",
+        min_value=1,
+        value=max(int(st.session_state.get("foreign_buy_window", 20)), 1),
+        step=1,
+        key="foreign_buy_window",
+        help="최근 N 거래일의 외국인 순매수 누적 기준입니다. 예: 60 입력 시 60거래일 누적",
+    )
     foreign_buy_metric = st.selectbox(
         "외국인 기준",
         list(FOREIGN_BUY_METRICS.keys()),
@@ -1756,7 +1790,7 @@ with technical_tab:
         FOREIGN_BUY_METRIC_CONFIGS["foreign_net_buy_value_20d"],
     )
     _render_technical_range_filter(
-        title=foreign_buy_metric_name,
+        title=f"{foreign_buy_metric_name} ({int(foreign_buy_window)}D)",
         mode_key="foreign_buy_filter_mode",
         mode_options=FOREIGN_BUY_MODES,
         bucket_key="foreign_buy_bucket",
