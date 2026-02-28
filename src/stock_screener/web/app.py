@@ -1247,12 +1247,11 @@ if not asof:
 
 base = repo.load_snapshot(asof)
 foreign_buy_window = max(int(st.session_state.get("foreign_buy_window", 20)), 1)
-try:
-    foreign_window_frame = repo.get_asof_frame(asof, window=20, foreign_window=foreign_buy_window)
-except Exception:
-    foreign_window_frame = pd.DataFrame()
+foreign_window_frame = repo.get_asof_frame(asof, window=20, foreign_window=foreign_buy_window)
 
-if not foreign_window_frame.empty:
+if foreign_window_frame.empty:
+    st.caption("외국인 누적 윈도우 재계산 결과가 비어 있어 snapshot 기본 20D 값을 사용합니다.")
+else:
     foreign_window_cols = [
         "ticker",
         "foreign_cum_volume_20d",
@@ -1263,7 +1262,6 @@ if not foreign_window_frame.empty:
         foreign_window_frame[foreign_window_cols],
         on="ticker",
         how="left",
-        suffixes=("", "_windowed"),
     )
     base["foreign_net_buy_volume_20d"] = base["foreign_cum_volume_20d"]
     base["foreign_net_buy_value_20d"] = base["foreign_cum_value_20d"]
@@ -1767,6 +1765,7 @@ with technical_tab:
     )
 
     st.markdown("##### 외국인")
+    st.caption("스크리닝 기준: 외국인 순매수 누적 거래일 수를 직접 지정할 수 있습니다.")
     foreign_buy_window = st.number_input(
         "외국인 누적 윈도우(거래일)",
         min_value=1,
@@ -1799,7 +1798,10 @@ with technical_tab:
         max_key="foreign_buy_max_custom",
         step=foreign_buy_metric_config["step"],
         number_format=foreign_buy_metric_config["number_format"],
-        help_text=foreign_buy_metric_config["help_text"],
+        help_text=(
+            f"{foreign_buy_metric_config['help_text']}"
+            f" · 현재 누적 윈도우: {int(foreign_buy_window)}거래일"
+        ),
         row_disabled=not technical_metric_availability.get(foreign_buy_metric, False),
     )
 
