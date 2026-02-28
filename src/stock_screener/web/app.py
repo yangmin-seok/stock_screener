@@ -1242,31 +1242,21 @@ if refresh_reserve:
 
 asof = st.session_state.asof
 if not asof:
-    st.warning("snapshot이 없습니다. 먼저 '초기 백필 + 스냅샷' 또는 '일일 증분 + 스냅샷' 또는 '스냅샷만 재계산' 버튼을 실행하세요.")
+    st.warning("snapshot이 없습니다. 먼저 '초기 백필 + 스냅샷' 또는 '일일 증분 + 스냅샷' 또는 '스냅샷만 재계산' 버튼을 실행하세요. (Technical 외국인 스크리닝 UI는 snapshot 생성 후 표시됩니다)")
     st.stop()
 
 base = repo.load_snapshot(asof)
 foreign_buy_window = max(int(st.session_state.get("foreign_buy_window", 20)), 1)
 foreign_window_frame = repo.get_asof_frame(asof, window=20, foreign_window=foreign_buy_window)
-
-if foreign_window_frame.empty:
-    st.caption("외국인 누적 윈도우 재계산 결과가 비어 있어 snapshot 기본 20D 값을 사용합니다.")
-else:
-    foreign_window_cols = [
-        "ticker",
-        "foreign_cum_volume_20d",
-        "foreign_cum_value_20d",
-        "foreign_pressure_by_mcap",
-    ]
+if not foreign_window_frame.empty:
     base = base.merge(
-        foreign_window_frame[foreign_window_cols],
+        foreign_window_frame[["ticker", "foreign_cum_volume_20d", "foreign_cum_value_20d", "foreign_pressure_by_mcap"]],
         on="ticker",
         how="left",
     )
     base["foreign_net_buy_volume_20d"] = base["foreign_cum_volume_20d"]
     base["foreign_net_buy_value_20d"] = base["foreign_cum_value_20d"]
     base["foreign_net_buy_value_20d_mcap_ratio"] = base["foreign_pressure_by_mcap"] * 100.0
-
 if "foreign_net_buy_value_20d_mcap_ratio" not in base.columns:
     base["foreign_net_buy_value_20d_mcap_ratio"] = pd.NA
 mcap_ratio_mask = (
@@ -1765,14 +1755,13 @@ with technical_tab:
     )
 
     st.markdown("##### 외국인")
-    st.caption("스크리닝 기준: 외국인 순매수 누적 거래일 수를 직접 지정할 수 있습니다.")
     foreign_buy_window = st.number_input(
         "외국인 누적 윈도우(거래일)",
         min_value=1,
         value=max(int(st.session_state.get("foreign_buy_window", 20)), 1),
         step=1,
         key="foreign_buy_window",
-        help="최근 N 거래일의 외국인 순매수 누적 기준입니다. 예: 60 입력 시 60거래일 누적",
+        help="최근 N 거래일 외국인 순매수 누적을 스크리닝 기준으로 사용합니다. 예: 60 입력 시 60거래일",
     )
     foreign_buy_metric = st.selectbox(
         "외국인 기준",
@@ -1798,10 +1787,7 @@ with technical_tab:
         max_key="foreign_buy_max_custom",
         step=foreign_buy_metric_config["step"],
         number_format=foreign_buy_metric_config["number_format"],
-        help_text=(
-            f"{foreign_buy_metric_config['help_text']}"
-            f" · 현재 누적 윈도우: {int(foreign_buy_window)}거래일"
-        ),
+        help_text=f"{foreign_buy_metric_config['help_text']} · 현재 누적 윈도우: {int(foreign_buy_window)}거래일",
         row_disabled=not technical_metric_availability.get(foreign_buy_metric, False),
     )
 
