@@ -2619,6 +2619,11 @@ show_cols = [
     "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_volume_60d", "foreign_net_buy_value", "foreign_net_buy_value_20d", "foreign_net_buy_value_60d", "foreign_net_buy_value_20d_mcap_ratio", "foreign_net_buy_value_60d_mcap_ratio",
     "eps_cagr_5y", "eps_yoy_q", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y", "pe_ratio", "forward_pe", "ps_ratio", "pb_ratio", "peg_ratio", "ev_sales", "ev_ebitda", "gross_margin", "operating_margin", "net_margin", "roa", "roe", "roic", "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio", "has_price_5y", "has_price_10y",
 ]
+
+for col in show_cols:
+    if col not in filtered.columns:
+        filtered[col] = pd.NA
+
 st.dataframe(
     filtered[show_cols],
     width="stretch",

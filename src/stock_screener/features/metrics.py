@@ -247,7 +247,9 @@ def build_snapshot(
             }
         )
 
-    growth = pd.concat([growth, growth["ticker"].apply(_growth_row)], axis=1)
+    growth_metrics = growth["ticker"].apply(_growth_row)
+    growth = pd.concat([growth, growth_metrics], axis=1)
+    growth = growth.loc[:, ~growth.columns.duplicated()]
     merged = merged.merge(growth, on="ticker", how="left")
 
     # Expanded fundamental metrics (NaN fallback when source fields are unavailable)
