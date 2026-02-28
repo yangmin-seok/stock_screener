@@ -316,8 +316,11 @@ NEAR_LOW_BUCKETS: dict[str, tuple[float | None, float | None]] = {
 }
 FOREIGN_BUY_METRICS: dict[str, tuple[str, str]] = {
     "foreign_net_buy_value_20d": ("외국인 순매수 20일 누적금액", "원"),
-    "foreign_net_buy_volume_20d": ("외국인 순매 20일 누적수량", "주"),
+    "foreign_net_buy_value_60d": ("외국인 순매수 60일 누적금액", "원"),
+    "foreign_net_buy_volume_20d": ("외국인 순매수 20일 누적수량", "주"),
+    "foreign_net_buy_volume_60d": ("외국인 순매수 60일 누적수량", "주"),
     "foreign_net_buy_value_20d_mcap_ratio": ("외국인 순매수 20일 누적금액 / 시총", "%"),
+    "foreign_net_buy_value_60d_mcap_ratio": ("외국인 순매수 60일 누적금액 / 시총", "%"),
 }
 FOREIGN_BUY_METRIC_CONFIGS: dict[str, dict[str, Any]] = {
     "foreign_net_buy_value_20d": {
@@ -326,11 +329,23 @@ FOREIGN_BUY_METRIC_CONFIGS: dict[str, dict[str, Any]] = {
         "number_format": "%.0f",
         "help_text": "금액(원, 당일 결측이면 20D 누적도 결측 처리)",
     },
+    "foreign_net_buy_value_60d": {
+        "bucket_options": FOREIGN_BUY_VALUE_BUCKETS,
+        "step": 1_000_000.0,
+        "number_format": "%.0f",
+        "help_text": "금액(원, 당일 결측이면 60D 누적도 결측 처리)",
+    },
     "foreign_net_buy_volume_20d": {
         "bucket_options": FOREIGN_BUY_VOLUME_BUCKETS,
         "step": 1_000.0,
         "number_format": "%.0f",
         "help_text": "수량(주, 당일 결측이면 20D 누적도 결측 처리)",
+    },
+    "foreign_net_buy_volume_60d": {
+        "bucket_options": FOREIGN_BUY_VOLUME_BUCKETS,
+        "step": 1_000.0,
+        "number_format": "%.0f",
+        "help_text": "수량(주, 당일 결측이면 60D 누적도 결측 처리)",
     },
     "foreign_net_buy_value_20d_mcap_ratio": {
         "bucket_options": FOREIGN_BUY_MCAP_INTENSITY_BUCKETS,
@@ -338,7 +353,21 @@ FOREIGN_BUY_METRIC_CONFIGS: dict[str, dict[str, Any]] = {
         "number_format": "%.2f",
         "help_text": "강도(%, 20D 누적금액 / 시가총액 × 100)",
     },
+    "foreign_net_buy_value_60d_mcap_ratio": {
+        "bucket_options": FOREIGN_BUY_MCAP_INTENSITY_BUCKETS,
+        "step": 0.1,
+        "number_format": "%.2f",
+        "help_text": "강도(%, 60D 누적금액 / 시가총액 × 100)",
+    },
 }
+
+FOREIGN_BUY_WINDOW_OPTIONS: dict[str, int] = {
+    "20거래일": 20,
+    "60거래일": 60,
+}
+
+def _foreign_metric_for_window(window: int) -> str:
+    return "foreign_net_buy_value_60d" if int(window) == 60 else "foreign_net_buy_value_20d"
 
 
 def _get_query_params() -> dict[str, Any]:
@@ -1014,7 +1043,7 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("volatility_bucket") not in VOLATILITY_BUCKETS:
         st.session_state.volatility_bucket = "전체"
         st.session_state.query_parse_errors.append("volatility_bucket")
-    foreign_buy_metric_for_bucket = st.session_state.get("foreign_buy_metric", "foreign_net_buy_value_20d")
+    foreign_buy_metric_for_bucket = _foreign_metric_for_window(int(st.session_state.get("foreign_buy_window", 20)))
     foreign_buy_bucket_options = FOREIGN_BUY_METRIC_CONFIGS.get(
         foreign_buy_metric_for_bucket,
         FOREIGN_BUY_METRIC_CONFIGS["foreign_net_buy_value_20d"],
@@ -1040,9 +1069,10 @@ if "query_params_restored" not in st.session_state:
     if st.session_state.get("momentum_metric") not in MOMENTUM_METRICS:
         st.session_state.momentum_metric = "ret_3m"
         st.session_state.query_parse_errors.append("momentum_metric")
-    if st.session_state.get("foreign_buy_metric") not in FOREIGN_BUY_METRICS:
-        st.session_state.foreign_buy_metric = "foreign_net_buy_value_20d"
-        st.session_state.query_parse_errors.append("foreign_buy_metric")
+    if int(st.session_state.get("foreign_buy_window", 20)) not in (20, 60):
+        st.session_state.foreign_buy_window = 20
+        st.session_state.query_parse_errors.append("foreign_buy_window")
+    st.session_state.foreign_buy_metric = _foreign_metric_for_window(int(st.session_state.get("foreign_buy_window", 20)))
 
     st.session_state.query_params_restored = True
 
@@ -1113,7 +1143,7 @@ if st.session_state.get("chg_open_bucket") not in CHG_OPEN_BUCKETS:
     st.session_state.chg_open_bucket = "전체"
 if st.session_state.get("volatility_bucket") not in VOLATILITY_BUCKETS:
     st.session_state.volatility_bucket = "전체"
-foreign_buy_metric_for_bucket = st.session_state.get("foreign_buy_metric", "foreign_net_buy_value_20d")
+foreign_buy_metric_for_bucket = _foreign_metric_for_window(int(st.session_state.get("foreign_buy_window", 20)))
 foreign_buy_bucket_options = FOREIGN_BUY_METRIC_CONFIGS.get(
     foreign_buy_metric_for_bucket,
     FOREIGN_BUY_METRIC_CONFIGS["foreign_net_buy_value_20d"],
@@ -1132,10 +1162,9 @@ if st.session_state.get("near_low_bucket") not in NEAR_LOW_BUCKETS:
     st.session_state.near_low_bucket = "전체"
 if st.session_state.get("momentum_metric") not in MOMENTUM_METRICS:
     st.session_state.momentum_metric = "ret_3m"
-if st.session_state.get("foreign_buy_metric") not in FOREIGN_BUY_METRICS:
-    st.session_state.foreign_buy_metric = "foreign_net_buy_value_20d"
-if int(st.session_state.get("foreign_buy_window", 20)) < 1:
+if int(st.session_state.get("foreign_buy_window", 20)) not in (20, 60):
     st.session_state.foreign_buy_window = 20
+st.session_state.foreign_buy_metric = _foreign_metric_for_window(int(st.session_state.get("foreign_buy_window", 20)))
 
 _poll_background_job()
 
@@ -1246,29 +1275,35 @@ if not asof:
     st.stop()
 
 base = repo.load_snapshot(asof)
-foreign_buy_window = max(int(st.session_state.get("foreign_buy_window", 20)), 1)
-foreign_window_frame = repo.get_asof_frame(asof, window=20, foreign_window=foreign_buy_window)
-if not foreign_window_frame.empty:
-    base = base.merge(
-        foreign_window_frame[["ticker", "foreign_cum_volume_20d", "foreign_cum_value_20d", "foreign_pressure_by_mcap"]],
-        on="ticker",
-        how="left",
-    )
-    base["foreign_net_buy_volume_20d"] = base["foreign_cum_volume_20d"]
-    base["foreign_net_buy_value_20d"] = base["foreign_cum_value_20d"]
-    base["foreign_net_buy_value_20d_mcap_ratio"] = base["foreign_pressure_by_mcap"] * 100.0
 if "foreign_net_buy_value_20d_mcap_ratio" not in base.columns:
     base["foreign_net_buy_value_20d_mcap_ratio"] = pd.NA
-mcap_ratio_mask = (
+if "foreign_net_buy_value_60d_mcap_ratio" not in base.columns:
+    base["foreign_net_buy_value_60d_mcap_ratio"] = pd.NA
+mcap_ratio_mask_20d = (
     base["foreign_net_buy_value_20d"].notna()
     & base["mcap"].notna()
     & (base["mcap"] != 0)
 )
-base.loc[mcap_ratio_mask, "foreign_net_buy_value_20d_mcap_ratio"] = (
-    base.loc[mcap_ratio_mask, "foreign_net_buy_value_20d"]
-    / base.loc[mcap_ratio_mask, "mcap"]
+base.loc[mcap_ratio_mask_20d, "foreign_net_buy_value_20d_mcap_ratio"] = (
+    base.loc[mcap_ratio_mask_20d, "foreign_net_buy_value_20d"]
+    / base.loc[mcap_ratio_mask_20d, "mcap"]
     * 100.0
 )
+mcap_ratio_mask_60d = (
+    "foreign_net_buy_value_60d" in base.columns
+    and base["foreign_net_buy_value_60d"].notna().any()
+)
+if mcap_ratio_mask_60d:
+    ratio_mask_60d = (
+        base["foreign_net_buy_value_60d"].notna()
+        & base["mcap"].notna()
+        & (base["mcap"] != 0)
+    )
+    base.loc[ratio_mask_60d, "foreign_net_buy_value_60d_mcap_ratio"] = (
+        base.loc[ratio_mask_60d, "foreign_net_buy_value_60d"]
+        / base.loc[ratio_mask_60d, "mcap"]
+        * 100.0
+    )
 if base.empty:
     st.warning(
         "해당 거래일 스냅샷이 없습니다. '스냅샷만 재계산' 버튼으로 스냅샷 재계산이 필요합니다."
@@ -1314,9 +1349,12 @@ technical_metric_availability = {
     "volatility_20d": "volatility_20d" in base.columns and base["volatility_20d"].notna().any(),
     "foreign_net_buy_volume": "foreign_net_buy_volume" in base.columns and base["foreign_net_buy_volume"].notna().any(),
     "foreign_net_buy_volume_20d": "foreign_net_buy_volume_20d" in base.columns and base["foreign_net_buy_volume_20d"].notna().any(),
+    "foreign_net_buy_volume_60d": "foreign_net_buy_volume_60d" in base.columns and base["foreign_net_buy_volume_60d"].notna().any(),
     "foreign_net_buy_value": "foreign_net_buy_value" in base.columns and base["foreign_net_buy_value"].notna().any(),
     "foreign_net_buy_value_20d": "foreign_net_buy_value_20d" in base.columns and base["foreign_net_buy_value_20d"].notna().any(),
+    "foreign_net_buy_value_60d": "foreign_net_buy_value_60d" in base.columns and base["foreign_net_buy_value_60d"].notna().any(),
     "foreign_net_buy_value_20d_mcap_ratio": "foreign_net_buy_value_20d_mcap_ratio" in base.columns and base["foreign_net_buy_value_20d_mcap_ratio"].notna().any(),
+    "foreign_net_buy_value_60d_mcap_ratio": "foreign_net_buy_value_60d_mcap_ratio" in base.columns and base["foreign_net_buy_value_60d_mcap_ratio"].notna().any(),
 }
 
 def _active_filter_count_from_state() -> int:
@@ -1755,30 +1793,20 @@ with technical_tab:
     )
 
     st.markdown("##### 외국인")
-    foreign_buy_window = st.number_input(
-        "외국인 누적 윈도우(거래일)",
-        min_value=1,
-        value=max(int(st.session_state.get("foreign_buy_window", 20)), 1),
-        step=1,
-        key="foreign_buy_window",
-        help="최근 N 거래일 외국인 순매수 누적을 스크리닝 기준으로 사용합니다. 예: 60 입력 시 60거래일",
+    foreign_buy_window_label = st.selectbox(
+        "외국인 누적 윈도우",
+        list(FOREIGN_BUY_WINDOW_OPTIONS.keys()),
+        index=0 if int(st.session_state.get("foreign_buy_window", 20)) == 20 else 1,
+        format_func=lambda label: f"{label} 누적",
+        key="foreign_buy_window_label",
     )
-    foreign_buy_metric = st.selectbox(
-        "외국인 기준",
-        list(FOREIGN_BUY_METRICS.keys()),
-        key="foreign_buy_metric",
-        format_func=lambda key: f"{FOREIGN_BUY_METRICS.get(key, (key, ''))[0]} ({key})",
-    )
-    foreign_buy_metric_name, foreign_buy_metric_unit = FOREIGN_BUY_METRICS.get(
-        foreign_buy_metric,
-        FOREIGN_BUY_METRICS["foreign_net_buy_value_20d"],
-    )
-    foreign_buy_metric_config = FOREIGN_BUY_METRIC_CONFIGS.get(
-        foreign_buy_metric,
-        FOREIGN_BUY_METRIC_CONFIGS["foreign_net_buy_value_20d"],
-    )
+    st.session_state.foreign_buy_window = FOREIGN_BUY_WINDOW_OPTIONS[foreign_buy_window_label]
+    foreign_buy_metric = _foreign_metric_for_window(int(st.session_state.get("foreign_buy_window", 20)))
+    st.session_state.foreign_buy_metric = foreign_buy_metric
+    foreign_buy_metric_name, foreign_buy_metric_unit = FOREIGN_BUY_METRICS[foreign_buy_metric]
+    foreign_buy_metric_config = FOREIGN_BUY_METRIC_CONFIGS[foreign_buy_metric]
     _render_technical_range_filter(
-        title=f"{foreign_buy_metric_name} ({int(foreign_buy_window)}D)",
+        title=foreign_buy_metric_name,
         mode_key="foreign_buy_filter_mode",
         mode_options=FOREIGN_BUY_MODES,
         bucket_key="foreign_buy_bucket",
@@ -1787,7 +1815,7 @@ with technical_tab:
         max_key="foreign_buy_max_custom",
         step=foreign_buy_metric_config["step"],
         number_format=foreign_buy_metric_config["number_format"],
-        help_text=f"{foreign_buy_metric_config['help_text']} · 현재 누적 윈도우: {int(foreign_buy_window)}거래일",
+        help_text=foreign_buy_metric_config["help_text"],
         row_disabled=not technical_metric_availability.get(foreign_buy_metric, False),
     )
 
@@ -1795,9 +1823,12 @@ with technical_tab:
         foreign_metrics = [
             "foreign_net_buy_volume",
             "foreign_net_buy_volume_20d",
+            "foreign_net_buy_volume_60d",
             "foreign_net_buy_value",
             "foreign_net_buy_value_20d",
+            "foreign_net_buy_value_60d",
             "foreign_net_buy_value_20d_mcap_ratio",
+            "foreign_net_buy_value_60d_mcap_ratio",
         ]
         total_count = len(base)
         st.write(f"선택 asof({asof}) 기준 전체 종목 수: **{total_count:,}개**")
@@ -2408,7 +2439,8 @@ if technical_metric_availability["volatility_20d"]:
         min_custom=st.session_state.get("volatility_min_custom", 0.0),
         max_custom=st.session_state.get("volatility_max_custom", 0.0),
     )
-selected_foreign_metric = st.session_state.get("foreign_buy_metric", "foreign_net_buy_value_20d")
+selected_foreign_metric = _foreign_metric_for_window(int(st.session_state.get("foreign_buy_window", 20)))
+st.session_state.foreign_buy_metric = selected_foreign_metric
 if technical_metric_availability.get(selected_foreign_metric, False):
     filtered = _apply_range_mode_filter(
         filtered,
@@ -2443,9 +2475,9 @@ sort_candidates = [
     "mcap", "pbr", "reserve_ratio", "roe_proxy", "ret_3m", "ret_6m", "ret_1y", "near_52w_high_ratio", "pos_52w", "div",
     "avg_value_20d", "current_value", "relative_value", "ev_ebitda", "eps_cagr_5y", "eps_yoy_q", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y",
     "rsi_14", "dist_sma20", "dist_sma50", "dist_sma200", "atr_14", "gap_pct", "chg_from_open_pct", "volatility_20d",
-    "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_value", "foreign_net_buy_value_20d", "foreign_net_buy_value_20d_mcap_ratio",
+    "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_volume_60d", "foreign_net_buy_value", "foreign_net_buy_value_20d", "foreign_net_buy_value_60d", "foreign_net_buy_value_20d_mcap_ratio", "foreign_net_buy_value_60d_mcap_ratio",
 ]
-selected_sort_metric = st.session_state.get("foreign_buy_metric", "foreign_net_buy_value_20d")
+selected_sort_metric = _foreign_metric_for_window(int(st.session_state.get("foreign_buy_window", 20)))
 if selected_sort_metric in sort_candidates:
     sort_candidates = [selected_sort_metric] + [candidate for candidate in sort_candidates if candidate != selected_sort_metric]
 
@@ -2557,7 +2589,7 @@ if st.session_state.get("volatility_filter_mode") != "Any":
         f"변동성(20D) {_format_range_summary(st.session_state.get('volatility_filter_mode', 'Any'), st.session_state.get('volatility_bucket', '전체'), st.session_state.get('volatility_min_custom', 0.0), st.session_state.get('volatility_max_custom', 0.0))}"
     )
 if st.session_state.get("foreign_buy_filter_mode") != "Any":
-    foreign_buy_metric = st.session_state.get("foreign_buy_metric", "foreign_net_buy_value_20d")
+    foreign_buy_metric = _foreign_metric_for_window(int(st.session_state.get("foreign_buy_window", 20)))
     foreign_buy_metric_name, foreign_buy_metric_unit = FOREIGN_BUY_METRICS.get(
         foreign_buy_metric,
         FOREIGN_BUY_METRICS["foreign_net_buy_value_20d"],
@@ -2585,7 +2617,7 @@ show_cols = [
     "ticker", "name", "market", "close", "mcap", "avg_value_20d", "current_value", "relative_value", "pbr", "reserve_ratio", "per", "div", "dps",
     "eps", "bps", "fiscal_period", "period_type", "reported_date", "consolidation_type", "financial_source", "roe_proxy", "eps_positive", "ret_3m", "ret_6m", "ret_1y",
     "rsi_14", "dist_sma20", "dist_sma50", "dist_sma200", "pos_52w", "near_52w_high_ratio", "atr_14", "gap_pct", "chg_from_open_pct", "volatility_20d",
-    "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_value", "foreign_net_buy_value_20d", "foreign_net_buy_value_20d_mcap_ratio",
+    "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_volume_60d", "foreign_net_buy_value", "foreign_net_buy_value_20d", "foreign_net_buy_value_60d", "foreign_net_buy_value_20d_mcap_ratio", "foreign_net_buy_value_60d_mcap_ratio",
     "eps_cagr_5y", "eps_yoy_q", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_5y", "pe_ratio", "forward_pe", "ps_ratio", "pb_ratio", "peg_ratio", "ev_sales", "ev_ebitda", "gross_margin", "operating_margin", "net_margin", "roa", "roe", "roic", "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio", "has_price_5y", "has_price_10y",
 ]
 st.dataframe(
@@ -2615,15 +2647,30 @@ st.dataframe(
             help="당일 외국인 순매수량이 결측이면 20D 누적도 결측으로 표시",
         ),
         "foreign_net_buy_value": st.column_config.NumberColumn("외국인 순매수금액(당일)", format="%,d"),
+        "foreign_net_buy_volume_60d": st.column_config.NumberColumn(
+            "외국인 순매수량(60D)",
+            format="%,d",
+            help="당일 외국인 순매수량이 결측이면 60D 누적도 결측으로 표시",
+        ),
         "foreign_net_buy_value_20d": st.column_config.NumberColumn(
             "외국인 순매수금액(20D 누적)",
             format="%,d",
             help="당일 외국인 순매수금액이 결측이면 20D 누적도 결측으로 표시",
         ),
+        "foreign_net_buy_value_60d": st.column_config.NumberColumn(
+            "외국인 순매수금액(60D 누적)",
+            format="%,d",
+            help="당일 외국인 순매수금액이 결측이면 60D 누적도 결측으로 표시",
+        ),
         "foreign_net_buy_value_20d_mcap_ratio": st.column_config.NumberColumn(
             "외국인 순매수강도(20D/시총)",
             format="%.2f%%",
             help="외국인 순매수 20D 누적금액 / 시가총액 × 100",
+        ),
+        "foreign_net_buy_value_60d_mcap_ratio": st.column_config.NumberColumn(
+            "외국인 순매수강도(60D/시총)",
+            format="%.2f%%",
+            help="외국인 순매수 60D 누적금액 / 시가총액 × 100",
         ),
     },
 )

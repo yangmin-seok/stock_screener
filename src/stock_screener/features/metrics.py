@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 RSI_WINDOW = 14
 ATR_WINDOW = 14
 VOLATILITY_WINDOW = 20
-FOREIGN_NET_BUY_WINDOW = 20
+FOREIGN_NET_BUY_WINDOW_20D = 20
+FOREIGN_NET_BUY_WINDOW_60D = 60
 
 
 def _safe_ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
@@ -125,24 +126,36 @@ def build_snapshot(
         if "foreign_net_buy_volume" in g.columns:
             volume_series = pd.to_numeric(g["foreign_net_buy_volume"], errors="coerce")
             g["foreign_net_buy_volume_20d"] = volume_series.rolling(
-                FOREIGN_NET_BUY_WINDOW,
-                min_periods=FOREIGN_NET_BUY_WINDOW,
+                FOREIGN_NET_BUY_WINDOW_20D,
+                min_periods=FOREIGN_NET_BUY_WINDOW_20D,
+            ).sum()
+            g["foreign_net_buy_volume_60d"] = volume_series.rolling(
+                FOREIGN_NET_BUY_WINDOW_60D,
+                min_periods=FOREIGN_NET_BUY_WINDOW_60D,
             ).sum()
             g.loc[volume_series.isna(), "foreign_net_buy_volume_20d"] = np.nan
+            g.loc[volume_series.isna(), "foreign_net_buy_volume_60d"] = np.nan
             g["foreign_net_buy_ratio"] = _safe_ratio(g["foreign_net_buy_volume"], g["foreign_net_buy_volume_20d"])
         else:
             g["foreign_net_buy_volume_20d"] = np.nan
+            g["foreign_net_buy_volume_60d"] = np.nan
             g["foreign_net_buy_ratio"] = np.nan
 
         if "foreign_net_buy_value" in g.columns:
             value_series = pd.to_numeric(g["foreign_net_buy_value"], errors="coerce")
             g["foreign_net_buy_value_20d"] = value_series.rolling(
-                FOREIGN_NET_BUY_WINDOW,
-                min_periods=FOREIGN_NET_BUY_WINDOW,
+                FOREIGN_NET_BUY_WINDOW_20D,
+                min_periods=FOREIGN_NET_BUY_WINDOW_20D,
+            ).sum()
+            g["foreign_net_buy_value_60d"] = value_series.rolling(
+                FOREIGN_NET_BUY_WINDOW_60D,
+                min_periods=FOREIGN_NET_BUY_WINDOW_60D,
             ).sum()
             g.loc[value_series.isna(), "foreign_net_buy_value_20d"] = np.nan
+            g.loc[value_series.isna(), "foreign_net_buy_value_60d"] = np.nan
         else:
             g["foreign_net_buy_value_20d"] = np.nan
+            g["foreign_net_buy_value_60d"] = np.nan
 
         for name, n in [("ret_1w", 5), ("ret_1m", 21), ("ret_3m", 63), ("ret_6m", 126), ("ret_1y", 252)]:
             g[name] = g["close"].pct_change(n)
@@ -170,8 +183,12 @@ def build_snapshot(
         merged["foreign_net_buy_volume_20d"] = np.nan
     if "foreign_net_buy_ratio" not in merged.columns:
         merged["foreign_net_buy_ratio"] = np.nan
+    if "foreign_net_buy_volume_60d" not in merged.columns:
+        merged["foreign_net_buy_volume_60d"] = np.nan
     if "foreign_net_buy_value_20d" not in merged.columns:
         merged["foreign_net_buy_value_20d"] = np.nan
+    if "foreign_net_buy_value_60d" not in merged.columns:
+        merged["foreign_net_buy_value_60d"] = np.nan
     merged["close"] = merged["close"].astype(float)
     eps_num = pd.to_numeric(merged["eps"], errors="coerce")
     bps_num = pd.to_numeric(merged["bps"], errors="coerce")
@@ -295,7 +312,7 @@ def build_snapshot(
         "vol_20d", "rsi_14", "atr_14", "gap_pct", "chg_from_open_pct", "volatility_20d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "eps_cagr_3y", "eps_cagr_5y", "eps_yoy_q", "eps_growth_ttm", "eps_qoq", "sales_growth_qoq", "sales_growth_ttm", "sales_cagr_3y", "sales_cagr_5y",
         "pe_ratio", "forward_pe", "ps_ratio", "pb_ratio", "peg_ratio", "ps", "peg", "ev", "ev_sales", "ev_ebitda",
         "gross_margin", "operating_margin", "net_margin", "roa", "roe", "roic",
-        "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio", "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_ratio", "foreign_net_buy_value", "foreign_net_buy_value_20d",
+        "debt_equity", "lt_debt_equity", "current_ratio", "quick_ratio", "payout_ratio", "foreign_net_buy_volume", "foreign_net_buy_volume_20d", "foreign_net_buy_volume_60d", "foreign_net_buy_ratio", "foreign_net_buy_value", "foreign_net_buy_value_20d", "foreign_net_buy_value_60d",
         "eps_cagr_3y_window_years", "eps_cagr_3y_asof", "eps_cagr_3y_sample_count",
         "eps_cagr_5y_window_years", "eps_cagr_5y_asof", "eps_cagr_5y_sample_count",
         "eps_yoy_q_window_years", "eps_yoy_q_asof", "eps_yoy_q_sample_count",

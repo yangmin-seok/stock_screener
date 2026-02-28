@@ -523,9 +523,11 @@ def test_replace_snapshot_persists_new_snapshot_metric_columns(tmp_path):
         "payout_ratio": 0.5,
         "foreign_net_buy_volume": 1234.0,
         "foreign_net_buy_volume_20d": 1000.0,
+        "foreign_net_buy_volume_60d": 3000.0,
         "foreign_net_buy_ratio": 1.234,
         "foreign_net_buy_value": 5_000_000.0,
         "foreign_net_buy_value_20d": 55_000_000.0,
+        "foreign_net_buy_value_60d": 155_000_000.0,
         "eps_cagr_3y_window_years": 3,
         "eps_cagr_3y_asof": "2024Q4",
         "eps_cagr_3y_sample_count": 4,
@@ -555,7 +557,9 @@ def test_replace_snapshot_persists_new_snapshot_metric_columns(tmp_path):
     assert float(row["gap_pct"]) == -0.01
     assert float(row["foreign_net_buy_volume_20d"]) == 1000.0
     assert float(row["foreign_net_buy_ratio"]) == 1.234
+    assert float(row["foreign_net_buy_volume_60d"]) == 3000.0
     assert float(row["foreign_net_buy_value_20d"]) == 55_000_000.0
+    assert float(row["foreign_net_buy_value_60d"]) == 155_000_000.0
 
 
 def test_get_trading_dates_prefers_calendar_ticker_with_fallback(tmp_path):
