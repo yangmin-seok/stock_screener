@@ -120,7 +120,6 @@ FILTER_SPECS: list[FilterSpec] = [
     FilterSpec("volatility_max_custom", "float", 0.0),
     FilterSpec("foreign_buy_filter_mode", "str", "Any"),
     FilterSpec("foreign_buy_metric", "str", "foreign_net_buy_value_20d"),
-    FilterSpec("foreign_buy_window", "int", 20),
     FilterSpec("foreign_buy_bucket", "str", "전체"),
     FilterSpec("foreign_buy_min_custom", "float", 0.0),
     FilterSpec("foreign_buy_max_custom", "float", 0.0),
