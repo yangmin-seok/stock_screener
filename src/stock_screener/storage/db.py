@@ -165,9 +165,11 @@ CREATE TABLE IF NOT EXISTS snapshot_metrics (
     payout_ratio REAL,
     foreign_net_buy_volume REAL,
     foreign_net_buy_volume_20d REAL,
+    foreign_net_buy_volume_60d REAL,
     foreign_net_buy_ratio REAL,
     foreign_net_buy_value REAL,
     foreign_net_buy_value_20d REAL,
+    foreign_net_buy_value_60d REAL,
     eps_cagr_3y_window_years INTEGER,
     eps_cagr_3y_asof TEXT,
     eps_cagr_3y_sample_count INTEGER,
@@ -358,9 +360,11 @@ def init_db(db_path: str | Path) -> None:
         _ensure_column(conn, "investor_flow_daily", "foreign_net_buy_value", "REAL")
         _ensure_column(conn, "snapshot_metrics", "foreign_net_buy_volume", "REAL")
         _ensure_column(conn, "snapshot_metrics", "foreign_net_buy_volume_20d", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "foreign_net_buy_volume_60d", "REAL")
         _ensure_column(conn, "snapshot_metrics", "foreign_net_buy_ratio", "REAL")
         _ensure_column(conn, "snapshot_metrics", "foreign_net_buy_value", "REAL")
         _ensure_column(conn, "snapshot_metrics", "foreign_net_buy_value_20d", "REAL")
+        _ensure_column(conn, "snapshot_metrics", "foreign_net_buy_value_60d", "REAL")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_fin_periodic_ticker_period ON financials_periodic(ticker, fiscal_period)"
         )
